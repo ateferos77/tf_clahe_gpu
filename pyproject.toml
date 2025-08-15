@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-clahe"
+dynamic = ["version"]
+description = "Ultra-fast GPU-accelerated CLAHE implementation achieving 7000+ images/second"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Baha2rM98", email = "your.email@example.com" }
+]
+keywords = ["gpu", "clahe", "image-processing", "tensorflow", "computer-vision"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/Baha2rM98/gpu-clahe"
+Repository = "https://github.com/Baha2rM98/gpu-clahe"
+Documentation = "https://gpu-clahe.readthedocs.io/"
