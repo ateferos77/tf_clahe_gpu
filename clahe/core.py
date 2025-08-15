@@ -237,21 +237,6 @@ def setup_gpu() -> None:
         print(f"GPU setup failed: {e}")
 
 
-# def _detect_input_type(images: ImageArray) -> InputType:
-#     """Detect if input is NumPy array or TensorFlow tensor"""
-#     if isinstance(images, tf.Tensor):
-#         return 'tensor'
-#     elif isinstance(images, np.ndarray):
-#         return 'numpy'
-#     else:
-#         # Try to convert to numpy if it's array-like
-#         try:
-#             images = np.asarray(images)
-#             return 'numpy'
-#         except:
-#             raise ValueError(f"Unsupported input type: {type(images)}. Expected numpy array or tf.Tensor")
-
-
 def _convert_input_to_numpy(images: ImageArray) -> NDArray[np.uint8]:
     """Convert TensorFlow tensor to NumPy array for processing"""
     if isinstance(images, tf.Tensor):
@@ -300,7 +285,6 @@ def _convert_with_pipeline_hybrid(
 
     # Add memory cleanup hints
     processed_count = 0
-    # total_batches = (len(np_images) + batch_size - 1) // batch_size
 
     for batch_idx, batch in enumerate(dataset):
         # Process batch on GPU
@@ -343,7 +327,6 @@ def _convert_with_batching_hybrid(
 
     # Pre-allocate output array
     results = np.empty(output_shape, dtype=np.uint8)
-    # total_batches = (len(np_images) + batch_size - 1) // batch_size
 
     for i in range(0, len(np_images), batch_size):
         end_idx = min(i + batch_size, len(np_images))
@@ -400,16 +383,11 @@ def convert_clahe(
 
     setup_gpu()
 
-    # # Detect and validate input type
-    # input_type = _detect_input_type(images)
-
     # Get length based on input type
     if isinstance(images, tf.Tensor):
         total_images = tf.shape(images)[0].numpy()
-        # input_shape = images.shape
     else:
         total_images = len(images)
-        # input_shape = images.shape
 
     if use_pipeline and total_images > 1000:  # Use pipeline for large datasets
         result = _convert_with_pipeline_hybrid(images, batch_size, tile_size, clip_limit, return_tensor)
