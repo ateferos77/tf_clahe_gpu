@@ -237,13 +237,6 @@ def setup_gpu() -> None:
         print(f"GPU setup failed: {e}")
 
 
-def _convert_input_to_numpy(images: ImageArray) -> NDArray[np.uint8]:
-    """Convert TensorFlow tensor to NumPy array for processing"""
-    if isinstance(images, tf.Tensor):
-        return images.numpy()
-    return images
-
-
 def _convert_output_format(
         results: Union[NDArray[np.uint8], tf.Tensor],
         return_tensor: bool = False
@@ -264,7 +257,7 @@ def _convert_with_pipeline_hybrid(
         batch_size: int,
         tile_size: int,
         clip_limit: float,
-        return_tensor: bool = False
+        return_tensor: bool
 ) -> Union[NDArray[np.uint8], tf.Tensor]:
     """Enhanced pipeline with hybrid input/output support"""
 
@@ -366,19 +359,6 @@ def convert_clahe(
 
     Returns:
         Processed images in requested format (numpy array or tf.Tensor)
-
-    Examples:
-        # NumPy input -> NumPy output
-        result_np = convert_clahe(np_images, return_tensor=False)
-
-        # NumPy input -> TensorFlow output
-        result_tf = convert_clahe(np_images, return_tensor=True)
-
-        # TensorFlow input -> NumPy output
-        result_np = convert_clahe(tf_images, return_tensor=False)
-
-        # TensorFlow input -> TensorFlow output
-        result_tf = convert_clahe(tf_images, return_tensor=True)
     """
 
     setup_gpu()
