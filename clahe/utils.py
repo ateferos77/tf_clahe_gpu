@@ -4,27 +4,27 @@ import time
 from typing import Union, Tuple, Dict, Any
 
 
-def validate_input(images: Union[np.ndarray, tf.Tensor]) -> Tuple[bool, str]:
-    """
-    Validate input images for CLAHE processing
-
-    Returns:
-        (is_valid, error_message)
-    """
-    if isinstance(images, np.ndarray):
-        if images.ndim not in [3, 4]:
-            return False, "Images must be 3D (batch, h, w) or 4D (batch, h, w, channels)"
-        if images.dtype not in [np.uint8, np.float32, np.float64]:
-            return False, "Images must be uint8, float32, or float64"
-        if len(images) == 0:
-            return False, "Empty image array"
-    elif isinstance(images, tf.Tensor):
-        if len(images.shape) not in [3, 4]:
-            return False, "Tensor must be 3D or 4D"
-    else:
-        return False, "Input must be numpy array or tensorflow tensor"
-
-    return True, ""
+# def validate_input(images: Union[np.ndarray, tf.Tensor]) -> Tuple[bool, str]:
+#     """
+#     Validate input images for CLAHE processing
+#
+#     Returns:
+#         (is_valid, error_message)
+#     """
+#     if isinstance(images, np.ndarray):
+#         if images.ndim not in [3, 4]:
+#             return False, "Images must be 3D (batch, h, w) or 4D (batch, h, w, channels)"
+#         if images.dtype not in [np.uint8, np.float32, np.float64]:
+#             return False, "Images must be uint8, float32, or float64"
+#         if len(images) == 0:
+#             return False, "Empty image array"
+#     elif isinstance(images, tf.Tensor):
+#         if len(images.shape) not in [3, 4]:
+#             return False, "Tensor must be 3D or 4D"
+#     else:
+#         return False, "Input must be numpy array or tensorflow tensor"
+#
+#     return True, ""
 
 
 def benchmark_performance(
