@@ -1,27 +1,169 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools-scm"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gpu-clahe"
 dynamic = ["version"]
-description = "Ultra-fast GPU-accelerated CLAHE implementation achieving 7000+ images/second"
+description = "GPU-accelerated CLAHE for TensorFlow"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "Baha2rM98", email = "your.email@example.com" }
+    { name = "Bahador Mirzazadeh", email = "baha2r.mirzazadeh98@gmail.com" },
+    { name = "Atefe Rostami", email = "ateferos77@gmail.com" },
 ]
-keywords = ["gpu", "clahe", "image-processing", "tensorflow", "computer-vision"]
+keywords = [
+    "clahe",
+    "computer-vision",
+    "gpu",
+    "histogram-equalization",
+    "image-processing",
+    "medical-imaging",
+    "tensorflow",
+]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Topic :: Scientific/Engineering :: Image Processing",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.23",
+    "tensorflow>=2.12",
+]
+
+[project.optional-dependencies]
+# The CUDA wheels are a large download, so GPU support is opt-in rather than a
+# hard dependency; the package runs (slowly) on CPU without them.
+gpu = ["tensorflow[and-cuda]>=2.12"]
+test = [
+    "opencv-python>=4.5",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+dev = [
+    "gpu-clahe[test]",
+    # Only needed by benchmarks/make_figures.py, which regenerates the README plots.
+    "matplotlib>=3.5",
+    "mypy>=1.8",
+    "ruff>=0.5",
 ]
 
 [project.urls]
 Homepage = "https://github.com/Baha2rM98/gpu-clahe"
 Repository = "https://github.com/Baha2rM98/gpu-clahe"
-Documentation = "https://gpu-clahe.readthedocs.io/"
+Issues = "https://github.com/Baha2rM98/gpu-clahe/issues"
+
+[tool.setuptools]
+# Explicit beats auto-discovery here: `benchmarks` and `tests` sit at the top
+# level and would otherwise be picked up as importable packages.
+packages = ["gpu_clahe"]
+
+[tool.setuptools.dynamic]
+version = { attr = "gpu_clahe.version.__version__" }
+
+[tool.setuptools.package-data]
+gpu_clahe = ["py.typed"]
+
+# --------------------------------------------------------------------------- #
+# Tooling
+# --------------------------------------------------------------------------- #
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# -ra surfaces the reasons for skips, which on this project usually means
+# "no GPU visible" and is worth seeing rather than silently passing.
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "gpu: requires a visible GPU",
+    "slow: takes more than a few seconds",
+]
+filterwarnings = [
+    "error",
+    # TensorFlow and its dependencies emit these on import; they are not ours
+    # to fix and turning them into errors would make the suite unrunnable.
+    "ignore::DeprecationWarning:tensorflow.*",
+    "ignore::DeprecationWarning:google.*",
+    "ignore::DeprecationWarning:pkg_resources.*",
+    "ignore:.*custom tp_new.*:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+    "ARG",  # unused arguments
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "D",    # docstrings
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # import sorting
+    "N",    # pep8-naming
+    "RUF",  # ruff-specific
+    "SIM",  # simplify
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "D203",  # conflicts with D211
+    "D213",  # conflicts with D212
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests document themselves through their names; a docstring on every
+# parametrised case would be noise.
+"tests/*" = ["D100", "D103"]
+"benchmarks/*" = ["D100", "D103"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+# The formatter rewrites Python blocks inside Markdown. Documentation quotes
+# code verbatim - including prior versions and deliberately bad examples - so
+# rewriting those blocks would misrepresent what is being shown.
+exclude = ["*.md"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# Neither ships type stubs complete enough to check against.
+module = ["tensorflow.*", "cv2.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "benchmarks.*"]
+disallow_untyped_defs = false
+
+[tool.coverage.run]
+source = ["gpu_clahe"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "pragma: no cover",
+]

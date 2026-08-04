@@ -1,1 +1,27 @@
-.idea
+# Editor and tooling config
+.idea/
+.vscode/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+# Stray benchmark output at the repo root only; docs/benchmark_results.json is
+# tracked deliberately, as the provenance for the published figures.
+/benchmark_results.json
+
+# Kept locally, deliberately not published yet.
+CHANGELOG.md
+IMPLEMENTATION_NOTES.md
+
+# Local scratch: see the walkthrough in the project notes.
+explore.py
+before_after.png
