@@ -15,8 +15,10 @@ output** across CPU/GPU, Python versions and TensorFlow versions.
 
 ![CLAHE on a hand radiograph](docs/images/fig1_qualitative.png)
 
-<sub>Pediatric hand radiograph from the [RSNA Pediatric Bone Age Challenge](https://www.rsna.org/education/ai-resources-and-training/ai-image-challenge/rsna-pediatric-bone-age-challenge-2017)
-dataset. Histograms are log-scaled — 43% of each image is near-black background.</sub>
+<sub>Pediatric hand radiograph from the RSNA Pediatric Bone Age Machine Learning
+Challenge dataset (Halabi et al., *Radiology* 2019 — see
+[Data and attribution](#data-and-attribution)). Histograms are log-scaled: 43% of
+each image is near-black background.</sub>
 
 ---
 
@@ -27,6 +29,7 @@ dataset. Histograms are log-scaled — 43% of each image is near-black backgroun
 - [Choosing `clip_limit`](#choosing-clip_limit) · [Agreement with OpenCV](#agreement-with-opencv)
 - [Performance](#performance) · [Determinism](#determinism) · [API](#api)
 - [Limitations](#limitations) · [Reproducing these results](#reproducing-these-results)
+- [Data and attribution](#data-and-attribution)
 
 ---
 
@@ -394,10 +397,55 @@ python benchmarks/run_benchmark.py --sizes 256 512 1024   # throughput table
 
 The benchmark writes JSON with `--json results.json`, including the full environment
 (TF version, GPU model, compute capability, platform). A throughput figure without its
-hardware is not a result.
+hardware is not a result. The raw data behind the throughput figure is committed at
+[`docs/benchmark_results.json`](docs/benchmark_results.json).
 
-The radiograph figures come from the RSNA Pediatric Bone Age Challenge dataset, which is
-publicly available for research use and is not redistributed here.
+Figures 1–3 are regenerated from a directory of equally-sized single-channel PNGs:
+
+```bash
+python benchmarks/make_figures.py --data /path/to/images
+```
+
+---
+
+## Data and attribution
+
+The radiographs in Figures 1–3 come from the **RSNA Pediatric Bone Age Machine Learning
+Challenge (2017)** dataset — de-identified pediatric hand radiographs released for
+research use. The dataset is **not redistributed with this package**; only derived
+figures illustrating the effect of CLAHE are shown. Obtain it from the
+[RSNA challenge page](https://www.rsna.org/education/ai-resources-and-training/ai-image-challenge/rsna-pediatric-bone-age-challenge-2017),
+subject to its terms of use.
+
+If you use the dataset, cite the challenge paper:
+
+> Halabi SS, Prevedello LM, Kalpathy-Cramer J, et al. **The RSNA Pediatric Bone Age
+> Machine Learning Challenge.** *Radiology*. 2019;290(2):498–503.
+> doi:[10.1148/radiol.2018180736](https://doi.org/10.1148/radiol.2018180736)
+
+```bibtex
+@article{halabi2019rsna,
+  title   = {The {RSNA} Pediatric Bone Age Machine Learning Challenge},
+  author  = {Halabi, Safwan S. and Prevedello, Luciano M. and
+             Kalpathy-Cramer, Jayashree and Mamonov, Artem B. and
+             Bilbily, Alexander and Cicero, Mark and Pan, Ian and
+             Pereira, Lucas Ara{\'u}jo and Sousa, Rafael Teixeira and
+             Abdala, Nitamar and Kitamura, Felipe Campos and
+             Thodberg, Hans H. and Chen, Leon and Shih, George and
+             Andriole, Katherine and Kohli, Marc D. and
+             Erickson, Bradley J. and Flanders, Adam E.},
+  journal = {Radiology},
+  volume  = {290},
+  number  = {2},
+  pages   = {498--503},
+  year    = {2019},
+  doi     = {10.1148/radiol.2018180736}
+}
+```
+
+The benchmark comparison uses [OpenCV](https://opencv.org/)'s `createCLAHE` as an
+independent reference implementation. The algorithm itself is due to Zuiderveld,
+*Contrast Limited Adaptive Histogram Equalization*, Graphics Gems IV, 1994.
 
 ---
 

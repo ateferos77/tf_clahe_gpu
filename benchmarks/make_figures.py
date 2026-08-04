@@ -7,9 +7,15 @@ Every number plotted is measured at run time, not copied from the text.
     python benchmarks/make_figures.py --data ... --bench docs/benchmark_results.json
 
 ``--data`` should point at a directory of single-channel PNGs of identical size.
-The published figures use the RSNA Pediatric Bone Age Challenge dataset
-(256x256, 8-bit), which is publicly available for research but not redistributed
-with this package.
+
+The published figures use the RSNA Pediatric Bone Age Machine Learning Challenge
+dataset (2017), de-identified pediatric hand radiographs released for research
+use. It is not redistributed with this package; obtain it from RSNA subject to
+its terms of use, and cite:
+
+    Halabi SS, Prevedello LM, Kalpathy-Cramer J, et al. The RSNA Pediatric Bone
+    Age Machine Learning Challenge. Radiology. 2019;290(2):498-503.
+    doi:10.1148/radiol.2018180736
 """
 
 from __future__ import annotations
