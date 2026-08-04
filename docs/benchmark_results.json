@@ -1,0 +1,384 @@
+{
+  "environment": {
+    "tensorflow_version": "2.20.0",
+    "built_with_cuda": true,
+    "num_gpus": 1,
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce GTX 1650",
+        "compute_capability": [
+          7,
+          5
+        ]
+      }
+    ]
+  },
+  "sweeps": [
+    {
+      "size": 256,
+      "gpu": {
+        "environment": {
+          "tensorflow_version": "2.20.0",
+          "built_with_cuda": true,
+          "num_gpus": 1,
+          "gpus": [
+            {
+              "name": "NVIDIA GeForce GTX 1650",
+              "compute_capability": [
+                7,
+                5
+              ]
+            }
+          ],
+          "python": "3.9.23",
+          "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39"
+        },
+        "results": [
+          {
+            "batch_size": 8,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.04750369899556972,
+            "mean_s": 0.04817292119259946,
+            "stdev_s": 0.0012486882798360371,
+            "min_s": 0.047113628999795765,
+            "images_per_second": 21556.216076889086,
+            "megapixels_per_second": 1412.708176815003
+          },
+          {
+            "batch_size": 16,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.023505438002757728,
+            "mean_s": 0.023636321001686156,
+            "stdev_s": 0.0005257043902923247,
+            "min_s": 0.023228206002386287,
+            "images_per_second": 43564.387095439844,
+            "megapixels_per_second": 2855.035672686746
+          },
+          {
+            "batch_size": 32,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.017469775018980727,
+            "mean_s": 0.017467432603007184,
+            "stdev_s": 1.9629755099002993e-05,
+            "min_s": 0.017446479003410786,
+            "images_per_second": 58615.52303263407,
+            "megapixels_per_second": 3841.426917466706
+          },
+          {
+            "batch_size": 64,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.017299069004366174,
+            "mean_s": 0.01731372159556486,
+            "stdev_s": 0.00011378218255984948,
+            "min_s": 0.017203672003233805,
+            "images_per_second": 59193.9369535753,
+            "megapixels_per_second": 3879.3338521895107
+          },
+          {
+            "batch_size": 128,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.0169470020045992,
+            "mean_s": 0.01698102939990349,
+            "stdev_s": 9.141815822228937e-05,
+            "min_s": 0.016888245998416096,
+            "images_per_second": 60423.66665927693,
+            "megapixels_per_second": 3959.925418182373
+          },
+          {
+            "batch_size": 256,
+            "num_images": 1024,
+            "image_shape": [
+              256,
+              256
+            ],
+            "median_s": 0.016756643017288297,
+            "mean_s": 0.016751905804267154,
+            "stdev_s": 9.931574858012259e-05,
+            "min_s": 0.01663805599673651,
+            "images_per_second": 61110.09221498068,
+            "megapixels_per_second": 4004.9110034009736
+          }
+        ]
+      },
+      "speedup_vs_opencv": 16.09782102202804,
+      "opencv": {
+        "batch_size": 1,
+        "num_images": 64,
+        "image_shape": [
+          256,
+          256
+        ],
+        "median_s": 0.016859090013895184,
+        "mean_s": 0.016868742667914677,
+        "stdev_s": 5.666302799902205e-05,
+        "min_s": 0.01681752598960884,
+        "images_per_second": 3796.1716763628106,
+        "megapixels_per_second": 248.78590698211315
+      }
+    },
+    {
+      "size": 512,
+      "gpu": {
+        "environment": {
+          "tensorflow_version": "2.20.0",
+          "built_with_cuda": true,
+          "num_gpus": 1,
+          "gpus": [
+            {
+              "name": "NVIDIA GeForce GTX 1650",
+              "compute_capability": [
+                7,
+                5
+              ]
+            }
+          ],
+          "python": "3.9.23",
+          "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39"
+        },
+        "results": [
+          {
+            "batch_size": 8,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.07546881801681593,
+            "mean_s": 0.0754293178091757,
+            "stdev_s": 0.00024947397300477614,
+            "min_s": 0.07509638901683502,
+            "images_per_second": 13568.517791968503,
+            "megapixels_per_second": 3556.9055280577913
+          },
+          {
+            "batch_size": 16,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.07431926901335828,
+            "mean_s": 0.0743190206005238,
+            "stdev_s": 5.663355297031693e-05,
+            "min_s": 0.07423188100801781,
+            "images_per_second": 13778.39170909962,
+            "megapixels_per_second": 3611.922716190211
+          },
+          {
+            "batch_size": 32,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.0730772320239339,
+            "mean_s": 0.07307499420712701,
+            "stdev_s": 3.052969252855006e-05,
+            "min_s": 0.07302820001496002,
+            "images_per_second": 14012.57233805222,
+            "megapixels_per_second": 3673.311762986361
+          },
+          {
+            "batch_size": 64,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.07274809697992168,
+            "mean_s": 0.07274518440244719,
+            "stdev_s": 8.431948346749545e-05,
+            "min_s": 0.07264704801491462,
+            "images_per_second": 14075.969578731685,
+            "megapixels_per_second": 3689.930969247039
+          },
+          {
+            "batch_size": 128,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.07249180300277658,
+            "mean_s": 0.07249146060203202,
+            "stdev_s": 6.491380150452216e-05,
+            "min_s": 0.072388325992506,
+            "images_per_second": 14125.735015319991,
+            "megapixels_per_second": 3702.976679856044
+          },
+          {
+            "batch_size": 256,
+            "num_images": 1024,
+            "image_shape": [
+              512,
+              512
+            ],
+            "median_s": 0.07238357301685028,
+            "mean_s": 0.07244092000764794,
+            "stdev_s": 0.00015568740082749262,
+            "min_s": 0.07233565501519479,
+            "images_per_second": 14146.856217799881,
+            "megapixels_per_second": 3708.513476358932
+          }
+        ]
+      },
+      "speedup_vs_opencv": 15.23534915583523,
+      "opencv": {
+        "batch_size": 1,
+        "num_images": 64,
+        "image_shape": [
+          512,
+          512
+        ],
+        "median_s": 0.06892431300366297,
+        "mean_s": 0.06867962165658052,
+        "stdev_s": 0.0005444443722567184,
+        "min_s": 0.0680557639861945,
+        "images_per_second": 928.5547756797914,
+        "megapixels_per_second": 243.41506311580324
+      }
+    },
+    {
+      "size": 1024,
+      "gpu": {
+        "environment": {
+          "tensorflow_version": "2.20.0",
+          "built_with_cuda": true,
+          "num_gpus": 1,
+          "gpus": [
+            {
+              "name": "NVIDIA GeForce GTX 1650",
+              "compute_capability": [
+                7,
+                5
+              ]
+            }
+          ],
+          "python": "3.9.23",
+          "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39"
+        },
+        "results": [
+          {
+            "batch_size": 8,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.2904942739987746,
+            "mean_s": 0.2904969077964779,
+            "stdev_s": 8.80158993525453e-05,
+            "min_s": 0.2904118440055754,
+            "images_per_second": 3525.0264519992556,
+            "megapixels_per_second": 3696.2581369315717
+          },
+          {
+            "batch_size": 16,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.28874763200292364,
+            "mean_s": 0.28877433800371366,
+            "stdev_s": 5.032122882110155e-05,
+            "min_s": 0.2887272060033865,
+            "images_per_second": 3546.349429420193,
+            "megapixels_per_second": 3718.616899303708
+          },
+          {
+            "batch_size": 32,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.28807248498196714,
+            "mean_s": 0.28808186619426124,
+            "stdev_s": 4.068652599525202e-05,
+            "min_s": 0.2880440150038339,
+            "images_per_second": 3554.660904404323,
+            "megapixels_per_second": 3727.3321124966674
+          },
+          {
+            "batch_size": 64,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.287627124984283,
+            "mean_s": 0.2876255585986655,
+            "stdev_s": 4.509523667752442e-05,
+            "min_s": 0.2875799950270448,
+            "images_per_second": 3560.164918576282,
+            "megapixels_per_second": 3733.1034896610436
+          },
+          {
+            "batch_size": 128,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.2874902820040006,
+            "mean_s": 0.28752340699429624,
+            "stdev_s": 8.38141065997063e-05,
+            "min_s": 0.28744405999896117,
+            "images_per_second": 3561.859527431784,
+            "megapixels_per_second": 3734.8804158363105
+          },
+          {
+            "batch_size": 256,
+            "num_images": 1024,
+            "image_shape": [
+              1024,
+              1024
+            ],
+            "median_s": 0.2888617060089018,
+            "mean_s": 0.2888441502000205,
+            "stdev_s": 0.00020974371357412506,
+            "min_s": 0.2884980629896745,
+            "images_per_second": 3544.948945113699,
+            "megapixels_per_second": 3717.148385071542
+          }
+        ]
+      },
+      "speedup_vs_opencv": 15.235795748687277,
+      "opencv": {
+        "batch_size": 1,
+        "num_images": 64,
+        "image_shape": [
+          1024,
+          1024
+        ],
+        "median_s": 0.2737589510215912,
+        "mean_s": 0.2740264863338477,
+        "stdev_s": 0.0011669264539267117,
+        "min_s": 0.2730165599787142,
+        "images_per_second": 233.78231017166763,
+        "megapixels_per_second": 245.13851967056655
+      }
+    }
+  ]
+}
