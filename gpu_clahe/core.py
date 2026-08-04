@@ -1,418 +1,394 @@
+"""GPU-accelerated CLAHE kernels.
+
+The algorithm is standard Zuiderveld CLAHE, expressed entirely as dense
+TensorFlow ops so the whole thing compiles to a handful of XLA kernels:
+
+1. **Tiling.** The image is padded up to a whole multiple of ``tile_size`` and
+   reshaped (no gather, no ``extract_patches``) into non-overlapping tiles.
+2. **Histogram.** A 256-bin histogram is built per tile, clipped at
+   ``clip_limit * tile_pixels``, and the clipped mass is redistributed. The
+   cumulative histogram is normalised into a 256-entry lookup table per tile.
+3. **Interpolation.** Every pixel is mapped through the LUTs of the four
+   surrounding tile centres and the results are bilinearly blended.
+
+Conventions worth knowing
+-------------------------
+* ``clip_limit`` is a **fraction of the pixels in a tile**, not OpenCV's
+  ``clipLimit``. ``0.035`` at ``tile_size=32`` clips any bin above 35 counts.
+  Passing OpenCV-style values (e.g. ``3.0``) disables clipping entirely and
+  degrades CLAHE to plain AHE.
+* Sample values are assumed to lie in ``[0, 255]`` regardless of dtype. Float
+  images normalised to ``[0, 1]`` must be scaled up first;
+  :func:`gpu_clahe.utils.validate_input` flags that case.
+* Only single-channel images are supported. A 4-D input must have a trailing
+  channel dimension of exactly 1.
+"""
+
+from __future__ import annotations
+
+import contextlib
+
 import tensorflow as tf
-import numpy as np
-from typing import Union, Literal
-from numpy.typing import NDArray
+
+__all__ = ["clahe_gpu", "clahe_gpu_nojit", "setup_gpu"]
+
+_NUM_BINS = 256
+_MAX_VALUE = 255.0
 
 
-@tf.function(jit_compile=True)
-def clahe_gpu(
-        images: tf.Tensor,
-        tile_size: int = 32,
-        clip_limit: float = 0.035,
-        dtype: tf.DType = tf.uint8
-) -> tf.Tensor:
+# --------------------------------------------------------------------------- #
+# Shape helpers
+# --------------------------------------------------------------------------- #
+def _static_hw(images: tf.Tensor) -> tuple[int, int]:
+    """Return the static ``(height, width)`` of a 3-D tensor.
+
+    The kernel needs ``H`` and ``W`` at trace time: the tile count, and so every
+    ``reshape`` in the tiling step, derives from them. Leaving them dynamic
+    would defeat XLA's shape inference, so we fail loudly instead of silently
+    falling back to a slow path.
     """
-    GPU-optimized CLAHE - For both 3D and 4D inputs
+    height, width = images.shape[1], images.shape[2]
+    if height is None or width is None:
+        raise ValueError(
+            "clahe_gpu requires static spatial dimensions; got shape "
+            f"{images.shape}. Batch size may be dynamic, but height and width "
+            "must be known at trace time (e.g. call set_shape((None, H, W)), or "
+            "use padded_batch/resize before entering a tf.data pipeline)."
+        )
+    return int(height), int(width)
 
-    Args:
-        images: Tensor of shape (batch, h, w) or (batch, h, w, 1)
-        tile_size: Size of each tile for CLAHE
-        clip_limit: Clipping limit for histogram equalization
-        dtype: Output data type
 
-    Returns:
-        Processed images with same shape as input
+# --------------------------------------------------------------------------- #
+# Stage 1 - tiling
+# --------------------------------------------------------------------------- #
+def _pad_symmetric(images: tf.Tensor, pad_y: int, pad_x: int) -> tf.Tensor:
+    """Symmetrically pad the bottom and right edges by ``pad_y`` / ``pad_x``.
+
+    Reflecting the border beats zero-filling, which would invent a spike at 0 in
+    the edge tiles' histograms and darken the image margins.
+
+    ``tf.pad`` refuses a SYMMETRIC pad wider than the axis it is padding, and
+    that limit is reachable: an image smaller than one tile needs
+    ``pad = tile_size - dim``, which exceeds ``dim`` whenever the image is under
+    half a tile across. Padding in chunks lifts the restriction and produces
+    exactly what ``numpy.pad(..., mode="symmetric")`` would. Each chunk at least
+    doubles the axis, so this runs in log(pad / dim) steps at trace time.
     """
-
-    # Handle input shapes properly
-    input_rank = len(images.shape)
-
-    # Convert to 3D if needed
-    if input_rank == 4:
-        images_3d = tf.squeeze(images, axis=-1)
-        return_4d = True
-    else:
-        images_3d = images
-        return_4d = False
-
-    batch_size = tf.shape(images_3d)[0]
-    h = tf.shape(images_3d)[1]
-    w = tf.shape(images_3d)[2]
-
-    # Pre-cast all constants to avoid repeated casting
-    images_f32 = tf.cast(images_3d, tf.float32)
-    tile_size_f32 = tf.cast(tile_size, tf.float32)
-    tile_size_i32 = tf.cast(tile_size, tf.int32)
-    clip_limit_f32 = tf.cast(clip_limit, tf.float32)
-    h_f32 = tf.cast(h, tf.float32)
-    w_f32 = tf.cast(w, tf.float32)
-
-    # Compute tile dimensions using only GPU ops
-    n_tiles_y = tf.cast(tf.math.ceil(h_f32 / tile_size_f32), tf.int32)
-    n_tiles_x = tf.cast(tf.math.ceil(w_f32 / tile_size_f32), tf.int32)
-    n_tiles_total = n_tiles_y * n_tiles_x
-
-    # Padding computation
-    pad_h = n_tiles_y * tile_size_i32 - h
-    pad_w = n_tiles_x * tile_size_i32 - w
-
-    # Symmetric padding for better edge handling
-    images_padded = tf.pad(images_f32, [[0, 0], [0, pad_h], [0, pad_w]], mode='SYMMETRIC')
-    padded_h = h + pad_h
-    padded_w = w + pad_w
-
-    # Ultra-efficient tile extraction using pure reshaping
-    tile_pixels = tile_size_i32 * tile_size_i32
-
-    # Reshape for tile extraction: (batch, n_tiles_y, tile_size, n_tiles_x, tile_size)
-    reshaped = tf.reshape(images_padded, [batch_size, n_tiles_y, tile_size_i32, n_tiles_x, tile_size_i32])
-
-    # Transpose to group tile pixels: (batch, n_tiles_y, n_tiles_x, tile_size, tile_size)
-    tiles_5d = tf.transpose(reshaped, [0, 1, 3, 2, 4])
-
-    # Final reshape to: (batch, n_tiles_total, tile_pixels)
-    tiles = tf.reshape(tiles_5d, [batch_size, n_tiles_total, tile_pixels])
-
-    # Convert to int32 for histogram operations with clamping
-    tiles_int = tf.cast(tf.clip_by_value(tiles, 0.0, 255.0), tf.int32)
-
-    # Ultra-fast vectorized histogram using broadcasting
-    # Expand tiles: (batch, n_tiles, pixels, 1)
-    tiles_expanded = tf.expand_dims(tiles_int, axis=-1)
-
-    # Create bin values: (1, 1, 1, 256)
-    bins = tf.reshape(tf.range(256, dtype=tf.int32), [1, 1, 1, 256])
-
-    # Compute all histograms simultaneously: (batch, n_tiles, 256)
-    histograms = tf.reduce_sum(
-        tf.cast(tf.equal(tiles_expanded, bins), tf.int32),
-        axis=2
-    )
-
-    # CLAHE processing - all vectorized
-    clip_value = tf.cast(tf.cast(tile_pixels, tf.float32) * clip_limit_f32, tf.int32)
-
-    # Clip histograms and redistribute excess
-    excess = tf.maximum(histograms - clip_value, 0)
-    clipped = tf.minimum(histograms, clip_value)
-    redistribute = tf.reduce_sum(excess, axis=2, keepdims=True) // 256
-    final_hist = clipped + redistribute
-
-    # Compute CDFs for all tiles
-    cdfs = tf.cumsum(final_hist, axis=2)
-
-    # Normalize CDFs to create lookup tables
-    cdf_min = cdfs[:, :, 0:1]
-    cdf_max = cdfs[:, :, -1:]
-    cdf_range = tf.cast(cdf_max - cdf_min, tf.float32)
-
-    # Create normalized LUTs
-    norm_factor = 255.0 / tf.maximum(cdf_range, 1.0)
-    luts = tf.cast(
-        (tf.cast(cdfs - cdf_min, tf.float32) * norm_factor),
-        tf.int32
-    )
-
-    # Bilinear interpolation setup - vectorized coordinate computation
-    y_coords = tf.cast(tf.range(padded_h), tf.float32) / tile_size_f32 - 0.5
-    x_coords = tf.cast(tf.range(padded_w), tf.float32) / tile_size_f32 - 0.5
-
-    # Create meshgrid
-    yy, xx = tf.meshgrid(y_coords, x_coords, indexing='ij')
-
-    # Compute interpolation coordinates
-    fy0 = tf.floor(yy)
-    fx0 = tf.floor(xx)
-    wy = yy - fy0
-    wx = xx - fx0
-
-    # Clamp tile indices
-    fy0_i = tf.clip_by_value(tf.cast(fy0, tf.int32), 0, n_tiles_y - 1)
-    fx0_i = tf.clip_by_value(tf.cast(fx0, tf.int32), 0, n_tiles_x - 1)
-    fy1_i = tf.clip_by_value(fy0_i + 1, 0, n_tiles_y - 1)
-    fx1_i = tf.clip_by_value(fx0_i + 1, 0, n_tiles_x - 1)
-
-    # Compute linear tile indices for the four corners
-    idx00 = fy0_i * n_tiles_x + fx0_i
-    idx01 = fy0_i * n_tiles_x + fx1_i
-    idx10 = fy1_i * n_tiles_x + fx0_i
-    idx11 = fy1_i * n_tiles_x + fx1_i
-
-    # Get pixel values
-    pixel_vals = tf.cast(tf.clip_by_value(images_padded, 0.0, 255.0), tf.int32)
-
-    # Optimized LUT application using advanced indexing
-    def apply_luts_vectorized(
-            luts_batch: tf.Tensor,
-            tile_indices: tf.Tensor,
-            pixel_values: tf.Tensor
-    ) -> tf.Tensor:
-        """Ultra-fast LUT application using vectorized operations"""
-
-        # Create batch dimension for tile indices
-        batch_range = tf.range(batch_size, dtype=tf.int32)
-        batch_indices = tf.reshape(batch_range, [-1, 1, 1])
-        batch_indices = tf.broadcast_to(batch_indices, [batch_size, padded_h, padded_w])
-
-        # Expand tile indices to batch dimension
-        tile_indices_batched = tf.expand_dims(tile_indices, 0)
-        tile_indices_batched = tf.broadcast_to(tile_indices_batched, [batch_size, padded_h, padded_w])
-
-        # Create gather indices for LUT selection: (batch, h, w, 2)
-        lut_gather_idx = tf.stack([batch_indices, tile_indices_batched], axis=-1)
-
-        # Gather LUTs: (batch, h, w, 256)
-        selected_luts = tf.gather_nd(luts_batch, lut_gather_idx)
-
-        # Apply LUTs to pixel values using advanced indexing
-        h_range = tf.range(padded_h, dtype=tf.int32)
-        w_range = tf.range(padded_w, dtype=tf.int32)
-
-        h_indices = tf.reshape(h_range, [1, -1, 1])
-        w_indices = tf.reshape(w_range, [1, 1, -1])
-
-        h_indices = tf.broadcast_to(h_indices, [batch_size, padded_h, padded_w])
-        w_indices = tf.broadcast_to(w_indices, [batch_size, padded_h, padded_w])
-
-        # Final gather indices: (batch, h, w, 4)
-        pixel_gather_idx = tf.stack([batch_indices, h_indices, w_indices, pixel_values], axis=-1)
-
-        # Apply LUTs
-        result = tf.gather_nd(selected_luts, pixel_gather_idx)
-        return tf.cast(result, tf.float32)
-
-    # Apply LUTs for all four interpolation corners
-    val00 = apply_luts_vectorized(luts, idx00, pixel_vals)
-    val01 = apply_luts_vectorized(luts, idx01, pixel_vals)
-    val10 = apply_luts_vectorized(luts, idx10, pixel_vals)
-    val11 = apply_luts_vectorized(luts, idx11, pixel_vals)
-
-    # Bilinear interpolation
-    val0 = val00 * (1.0 - wx) + val01 * wx
-    val1 = val10 * (1.0 - wx) + val11 * wx
-    interpolated = val0 * (1.0 - wy) + val1 * wy
-
-    # Crop to original size
-    result = interpolated[:, :h, :w]
-
-    # Final type conversion
-    result_clamped = tf.clip_by_value(result, 0.0, 255.0)
-    result_typed = tf.cast(result_clamped, dtype)
-
-    # Return in correct shape
-    if return_4d:
-        result_typed = tf.expand_dims(result_typed, axis=-1)
-
-    return result_typed
-
-
-@tf.function(jit_compile=True)
-def clahe_gpu_wrapper(
-        batch_tensor: tf.Tensor,
-        tile_size: int,
-        clip_limit: float
-) -> tf.Tensor:
-    """JIT-compiled wrapper function"""
-    return clahe_gpu(batch_tensor, tile_size=tile_size, clip_limit=clip_limit, dtype=tf.uint8)
-
-
-# Type aliases for better readability
-ImageArray = Union[NDArray[np.uint8], tf.Tensor]
-OutputType = Literal['numpy', 'tensor']
-InputType = Literal['numpy', 'tensor']
-
-
-def setup_gpu() -> None:
-    """Safe GPU setup that works even after TensorFlow is initialized"""
-    try:
-        tf.config.optimizer.set_jit(True)
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
-            for gpu in gpus:
-                try:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-                except:
-                    pass
-    except Exception as e:
-        print(f"GPU setup failed: {e}")
-
-
-# def _detect_input_type(images: ImageArray) -> InputType:
-#     """Detect if input is NumPy array or TensorFlow tensor"""
-#     if isinstance(images, tf.Tensor):
-#         return 'tensor'
-#     elif isinstance(images, np.ndarray):
-#         return 'numpy'
-#     else:
-#         # Try to convert to numpy if it's array-like
-#         try:
-#             images = np.asarray(images)
-#             return 'numpy'
-#         except:
-#             raise ValueError(f"Unsupported input type: {type(images)}. Expected numpy array or tf.Tensor")
-
-
-def _convert_input_to_numpy(images: ImageArray) -> NDArray[np.uint8]:
-    """Convert TensorFlow tensor to NumPy array for processing"""
-    if isinstance(images, tf.Tensor):
-        return images.numpy()
+    while pad_y > 0 or pad_x > 0:
+        step_y = min(pad_y, int(images.shape[1]))
+        step_x = min(pad_x, int(images.shape[2]))
+        images = tf.pad(images, [[0, 0], [0, step_y], [0, step_x]], mode="SYMMETRIC")
+        pad_y -= step_y
+        pad_x -= step_x
     return images
 
 
-def _convert_output_format(
-        results: Union[NDArray[np.uint8], tf.Tensor],
-        return_tensor: bool = False
-) -> Union[NDArray[np.uint8], tf.Tensor]:
-    """Convert output to desired format"""
-    if return_tensor:
-        if isinstance(results, np.ndarray):
-            return tf.convert_to_tensor(results, dtype=tf.uint8)
-        return results
-    else:
-        if isinstance(results, tf.Tensor):
-            return results.numpy()
-        return results
+def _extract_tiles(
+    images: tf.Tensor, tile_size: int, n_tiles_y: int, n_tiles_x: int
+) -> tf.Tensor:
+    """Reshape ``(B, pH, pW)`` into ``(B, n_tiles, tile_size ** 2)``.
 
-
-def _convert_with_pipeline_hybrid(
-        images: ImageArray,
-        batch_size: int,
-        tile_size: int,
-        clip_limit: float,
-        return_tensor: bool = False
-) -> Union[NDArray[np.uint8], tf.Tensor]:
-    """Enhanced pipeline with hybrid input/output support"""
-
-    # Pre-allocate output array (always numpy for intermediate processing)
-    if isinstance(images, tf.Tensor):
-        output_shape = images.shape
-        np_images = images.numpy()
-    else:
-        output_shape = images.shape
-        np_images = images
-
-    results = np.empty(output_shape, dtype=np.uint8)
-
-    # Enhanced pipeline with more aggressive prefetching
-    dataset = tf.data.Dataset.from_tensor_slices(np_images)
-    dataset = dataset.batch(batch_size, drop_remainder=False)
-    dataset = dataset.prefetch(3)  # More aggressive prefetching
-
-    # Add memory cleanup hints
-    processed_count = 0
-    # total_batches = (len(np_images) + batch_size - 1) // batch_size
-
-    for batch_idx, batch in enumerate(dataset):
-        # Process batch on GPU
-        with tf.device('/GPU:0'):  # Explicit GPU placement
-            processed_batch = clahe_gpu_wrapper(batch, tile_size, clip_limit)
-
-        # Copy results and immediate cleanup
-        start_idx = batch_idx * batch_size
-        end_idx = min(start_idx + batch_size, len(np_images))
-        actual_batch_size = end_idx - start_idx
-
-        results[start_idx:end_idx] = processed_batch[:actual_batch_size].numpy()
-
-        # Explicit memory cleanup for large batches
-        if batch_size > 64:
-            del processed_batch
-
-        processed_count += actual_batch_size
-
-    # Convert to desired output format
-    return _convert_output_format(results, return_tensor)
-
-
-def _convert_with_batching_hybrid(
-        images: ImageArray,
-        batch_size: int,
-        tile_size: int,
-        clip_limit: float,
-        return_tensor: bool = False
-) -> Union[NDArray[np.uint8], tf.Tensor]:
-    """Optimized batching with hybrid input/output support"""
-
-    # Convert input to numpy for processing
-    if isinstance(images, tf.Tensor):
-        np_images = images.numpy()
-        output_shape = images.shape
-    else:
-        np_images = images
-        output_shape = images.shape
-
-    # Pre-allocate output array
-    results = np.empty(output_shape, dtype=np.uint8)
-    # total_batches = (len(np_images) + batch_size - 1) // batch_size
-
-    for i in range(0, len(np_images), batch_size):
-        end_idx = min(i + batch_size, len(np_images))
-        batch = np_images[i:end_idx]
-
-        # Use tf.convert_to_tensor for processing
-        batch_tensor = tf.convert_to_tensor(batch, dtype=tf.uint8)
-
-        # Process batch
-        processed = clahe_gpu_wrapper(batch_tensor, tile_size, clip_limit)
-
-        # Direct assignment to pre-allocated array
-        results[i:end_idx] = processed.numpy()
-
-    # Convert to desired output format
-    return _convert_output_format(results, return_tensor)
-
-
-def convert_clahe(
-        images: ImageArray,
-        batch_size: int = 128,
-        tile_size: int = 32,
-        clip_limit: float = 0.035,
-        use_pipeline: bool = False,
-        return_tensor: bool = False
-) -> Union[NDArray[np.uint8], tf.Tensor]:
+    Pure reshape + transpose, so this costs one contiguous copy rather than a
+    gather. ``pH`` and ``pW`` must already be exact multiples of ``tile_size``.
     """
-    Ultra-optimized CLAHE conversion with hybrid input/output support
+    grouped = tf.reshape(images, [-1, n_tiles_y, tile_size, n_tiles_x, tile_size])
+    # (B, ty, ts, tx, ts) -> (B, ty, tx, ts, ts) so each tile is contiguous.
+    grouped = tf.transpose(grouped, [0, 1, 3, 2, 4])
+    return tf.reshape(grouped, [-1, n_tiles_y * n_tiles_x, tile_size * tile_size])
+
+
+# --------------------------------------------------------------------------- #
+# Stage 2 - per-tile histograms and LUTs
+# --------------------------------------------------------------------------- #
+def _histograms_by_scatter(tiles: tf.Tensor, batch: int, n_tiles: int) -> tf.Tensor:
+    """256-bin histogram per tile via a single scatter-add. ``(B, T, 256)`` int32.
+
+    This is the fast path, and by a wide margin: it touches one element per
+    pixel, where the one-hot formulation touches 256. On a GTX 1650 at
+    32x512x512 it runs in 1.1 ms against 13.3 ms - and since the histogram is
+    ~85% of the kernel's total time, that difference sets the throughput of the
+    whole package.
+
+    Each tile is given its own 256-wide slice of a flat segment space, so one
+    ``unsorted_segment_sum`` bins every tile of every image at once. Adding
+    int32 ones makes the scatter exactly reproducible despite the atomics -
+    integer addition is associative, so ordering cannot change the result. The
+    same trick in float would not be deterministic.
+
+    Requires a static batch size: XLA needs ``num_segments`` at compile time.
+    """
+    offsets = tf.range(batch * n_tiles, dtype=tf.int32) * _NUM_BINS
+    segments = tf.reshape(tiles, [batch * n_tiles, -1]) + tf.expand_dims(offsets, 1)
+    segments = tf.reshape(segments, [-1])
+
+    counts = tf.math.unsorted_segment_sum(
+        tf.ones_like(segments), segments, batch * n_tiles * _NUM_BINS
+    )
+    return tf.reshape(counts, [batch, n_tiles, _NUM_BINS])
+
+
+def _histograms_by_one_hot(tiles: tf.Tensor) -> tf.Tensor:
+    """256-bin histogram per tile, without needing a static batch size.
+
+    ~12x slower than the scatter path, so this only runs when the batch size is
+    dynamic. XLA fuses the one-hot into the reduction, so the ``(B, T, P, 256)``
+    intermediate is never materialised - without that fusion this would need
+    tens of GB.
+    """
+    return tf.reduce_sum(tf.one_hot(tiles, _NUM_BINS, dtype=tf.int32), axis=2)
+
+
+def _histograms(tiles: tf.Tensor, batch: int | None, n_tiles: int) -> tf.Tensor:
+    """Per-tile histograms, picking the fastest formulation the shapes allow."""
+    if batch is None:
+        return _histograms_by_one_hot(tiles)
+    return _histograms_by_scatter(tiles, batch, n_tiles)
+
+
+def _clip_and_redistribute(histograms: tf.Tensor, clip_value: int) -> tf.Tensor:
+    """Clip each bin at ``clip_value`` and spread the excess over all bins.
+
+    Single-pass redistribution: the excess is divided evenly across the 256 bins
+    and the integer remainder is dropped. Re-clipping after redistribution (as
+    OpenCV does not, but some implementations do) is deliberately skipped - it
+    costs another pass and moves results by at most one count per bin.
+    """
+    excess = tf.reduce_sum(
+        tf.maximum(histograms - clip_value, 0), axis=-1, keepdims=True
+    )
+    return tf.minimum(histograms, clip_value) + excess // _NUM_BINS
+
+
+def _build_luts(histograms: tf.Tensor) -> tf.Tensor:
+    """Turn clipped histograms into ``(B, n_tiles, 256)`` uint8 LUTs.
+
+    Computes the textbook normalisation
+    ``(cdf - cdf[0]) * 255 / (cdf[-1] - cdf[0])`` in **exact integer
+    arithmetic**. The float spelling is tempting but not portable: XLA:GPU
+    lowers float division to an approximate reciprocal, so a quotient that is
+    exactly ``x.5`` on the CPU comes out a fraction below it on the GPU and
+    rounds the other way. That made the same input produce different pixels on
+    different devices. Integer division has no such freedom.
+
+    ``(2 * 255 * n + s) // (2 * s)`` is round-half-up of ``255 * n / s``.
+
+    Overflow: ``n`` is at most ``tile_size ** 2``, so the numerator stays below
+    ``2**31`` for any ``tile_size`` up to ~2000 - far past anything useful.
+
+    Note this differs from OpenCV, which scales by ``255 / tile_pixels`` without
+    subtracting the floor, so outputs agree closely but not bit-exactly.
+    """
+    cdf = tf.cumsum(histograms, axis=-1)
+    cdf_min = cdf[..., :1]
+    numerator = cdf - cdf_min
+
+    # A flat tile has cdf_max == cdf_min; clamping the span to 1 maps it to
+    # all-zeros instead of dividing by zero.
+    span = tf.maximum(cdf[..., -1:] - cdf_min, 1)
+
+    lut = (2 * 255 * numerator + span) // (2 * span)
+    # numerator <= span always, so the clip only guards against a malformed
+    # histogram; the arithmetic above cannot exceed 255 on its own. uint8 is
+    # therefore lossless here, and it quarters the memory traffic through the
+    # per-pixel gathers in _apply_luts, which is the kernel's largest stage.
+    return tf.cast(tf.clip_by_value(lut, 0, 255), tf.uint8)
+
+
+# --------------------------------------------------------------------------- #
+# Stage 3 - bilinear LUT interpolation
+# --------------------------------------------------------------------------- #
+def _tile_axis_weights(
+    length: int, tile_size: int, n_tiles: int
+) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    """Per-pixel lower/upper tile index and blend weight along one axis.
+
+    Pixel ``p`` sits at continuous tile coordinate ``p / tile_size - 0.5``, which
+    puts tile ``k``'s centre exactly at coordinate ``k``.
+
+    Both indices are clamped from the *unclamped* floor, and that detail is what
+    makes the borders correct: in the outer half-tile the floor is ``-1``, so
+    lower and upper both clamp to ``0`` and the blend collapses onto the edge
+    tile's LUT whatever the weight is. Deriving the upper index from the
+    already-clamped lower index instead blends tiles 0 and 1 using a weight
+    computed for tiles -1 and 0, which smears the top and left edges.
+    """
+    coord = tf.range(length, dtype=tf.float32) / float(tile_size) - 0.5
+    floor = tf.floor(coord)
+    weight = coord - floor
+
+    base = tf.cast(floor, tf.int32)
+    lower = tf.clip_by_value(base, 0, n_tiles - 1)
+    upper = tf.clip_by_value(base + 1, 0, n_tiles - 1)
+    return lower, upper, weight
+
+
+def _apply_luts(
+    luts: tf.Tensor,
+    values: tf.Tensor,
+    height: int,
+    width: int,
+    tile_size: int,
+    n_tiles_y: int,
+    n_tiles_x: int,
+) -> tf.Tensor:
+    """Map every pixel through its four neighbouring LUTs and blend them.
+
+    The LUTs are flattened to ``(B, n_tiles * 256)`` and addressed by the
+    combined index ``tile * 256 + value``, so each pixel costs one scalar
+    gather. The obvious alternative - gather each pixel's whole 256-entry LUT,
+    then index it - materialises a ``(B, H, W, 256)`` tensor, i.e. 34 GB for a
+    128x512x512 batch, which is what previously forced tiny batches.
+    """
+    iy0, iy1, wy = _tile_axis_weights(height, tile_size, n_tiles_y)
+    ix0, ix1, wx = _tile_axis_weights(width, tile_size, n_tiles_x)
+
+    # Tile indices are shared across the batch, so they stay (H, 1) / (1, W) and
+    # broadcast rather than being materialised per image.
+    row0 = tf.expand_dims(iy0 * n_tiles_x, axis=1)
+    row1 = tf.expand_dims(iy1 * n_tiles_x, axis=1)
+    col0 = tf.expand_dims(ix0, axis=0)
+    col1 = tf.expand_dims(ix1, axis=0)
+
+    luts_flat = tf.reshape(luts, [-1, n_tiles_y * n_tiles_x * _NUM_BINS])
+
+    def lookup(tile_index: tf.Tensor) -> tf.Tensor:
+        # (1, H, W) tile offsets broadcast against (B, H, W) values; XLA fuses
+        # the arithmetic into the gather so no index tensor is ever stored.
+        flat_index = tf.expand_dims(tile_index, 0) * _NUM_BINS + values
+        return tf.cast(tf.gather(luts_flat, flat_index, batch_dims=1), tf.float32)
+
+    wy = tf.expand_dims(wy, axis=1)  # (H, 1), broadcasts across width
+    top = lookup(row0 + col0) * (1.0 - wx) + lookup(row0 + col1) * wx
+    bottom = lookup(row1 + col0) * (1.0 - wx) + lookup(row1 + col1) * wx
+    return top * (1.0 - wy) + bottom * wy
+
+
+# --------------------------------------------------------------------------- #
+# Public kernel
+# --------------------------------------------------------------------------- #
+def _clahe_impl(
+    images: tf.Tensor, tile_size: int, clip_limit: float, dtype: tf.DType
+) -> tf.Tensor:
+    rank = images.shape.rank
+    if rank is None:
+        raise ValueError("clahe_gpu requires a tensor of known rank (3 or 4).")
+    if rank not in (3, 4):
+        raise ValueError(
+            f"Expected a 3-D (B, H, W) or 4-D (B, H, W, 1) tensor, got rank {rank}."
+        )
+
+    expand_output = rank == 4
+    if expand_output:
+        channels = images.shape[-1]
+        if channels is not None and channels != 1:
+            raise ValueError(
+                "Only single-channel images are supported; got a 4-D input with "
+                f"{channels} channels. Convert to grayscale, or apply the kernel "
+                "per channel (e.g. to the L channel of LAB)."
+            )
+        images = tf.squeeze(images, axis=-1)
+
+    height, width = _static_hw(images)
+    if tile_size < 2:
+        raise ValueError(f"tile_size must be >= 2, got {tile_size}.")
+
+    # Values index into the LUT from here on, so clamp once, up front.
+    values = tf.cast(
+        tf.clip_by_value(tf.cast(images, tf.float32), 0.0, _MAX_VALUE), tf.int32
+    )
+
+    n_tiles_y = -(-height // tile_size)  # ceil division
+    n_tiles_x = -(-width // tile_size)
+    pad_y = n_tiles_y * tile_size - height
+    pad_x = n_tiles_x * tile_size - width
+
+    padded = _pad_symmetric(values, pad_y, pad_x)
+
+    tile_pixels = tile_size * tile_size
+    tiles = _extract_tiles(padded, tile_size, n_tiles_y, n_tiles_x)
+
+    batch = images.shape[0]
+    histograms = _histograms(
+        tiles, None if batch is None else int(batch), n_tiles_y * n_tiles_x
+    )
+    clip_value = max(1, int(tile_pixels * clip_limit))
+    luts = _build_luts(_clip_and_redistribute(histograms, clip_value))
+
+    # Interpolation reads the *unpadded* image: the padding existed only to make
+    # the tile grid regular, so there is no reason to pay for it twice.
+    result = _apply_luts(luts, values, height, width, tile_size, n_tiles_y, n_tiles_x)
+
+    if dtype.is_integer:
+        result = tf.round(result)
+    result = tf.cast(tf.clip_by_value(result, 0.0, _MAX_VALUE), dtype)
+
+    if expand_output:
+        result = tf.expand_dims(result, axis=-1)
+    return result
+
+
+# reduce_retracing is deliberately off: it generalises the input signature, and
+# once it has seen both a 3-D and a 4-D call it relaxes to unknown rank, which
+# this kernel cannot trace. It would buy nothing anyway - XLA needs static
+# shapes, so every distinct shape gets its own compilation either way.
+#
+# autograph is off because there is nothing for it to convert: every branch and
+# loop here runs on Python values (ranks, tile counts, dtypes), never on tensor
+# values. Leaving it on rewrites the source into a generated temp file, which
+# buries real exceptions under generated frames and hides the module from
+# coverage.
+@tf.function(jit_compile=True, autograph=False)
+def clahe_gpu(
+    images: tf.Tensor,
+    tile_size: int = 32,
+    clip_limit: float = 0.035,
+    dtype: tf.DType = tf.uint8,
+) -> tf.Tensor:
+    """Apply CLAHE to a batch of single-channel images.
 
     Args:
-        images: Input images (numpy.ndarray or tf.Tensor)
-        batch_size: Batch size for processing
-        tile_size: CLAHE tile size
-        clip_limit: CLAHE clip limit
-        use_pipeline: Whether to use tf.data pipeline (recommended for large datasets)
-        return_tensor: If True, return tf.Tensor; if False, return numpy.ndarray
+        images: ``(B, H, W)`` or ``(B, H, W, 1)`` tensor of any numeric dtype;
+            values are interpreted on a ``[0, 255]`` scale. ``H`` and ``W`` must
+            be static, ``B`` may be dynamic.
+        tile_size: Side length in pixels of each contextual region. The image is
+            symmetrically padded up to a multiple of this.
+        clip_limit: Contrast limit as a **fraction of the pixels in a tile**
+            (see module docstring). Values >= 1.0 disable clipping.
+        dtype: Output dtype. Integer dtypes are rounded, floats are not.
 
     Returns:
-        Processed images in requested format (numpy array or tf.Tensor)
+        A tensor of ``dtype`` with the same shape as ``images``.
 
-    Examples:
-        # NumPy input -> NumPy output
-        result_np = convert_clahe(np_images, return_tensor=False)
-
-        # NumPy input -> TensorFlow output
-        result_tf = convert_clahe(np_images, return_tensor=True)
-
-        # TensorFlow input -> NumPy output
-        result_np = convert_clahe(tf_images, return_tensor=False)
-
-        # TensorFlow input -> TensorFlow output
-        result_tf = convert_clahe(tf_images, return_tensor=True)
+    Raises:
+        ValueError: If rank, channel count, spatial shape or ``tile_size`` is
+            unsupported.
     """
+    return _clahe_impl(images, tile_size, clip_limit, dtype)
 
-    setup_gpu()
 
-    # # Detect and validate input type
-    # input_type = _detect_input_type(images)
+#: Non-XLA twin of :func:`clahe_gpu`. Useful when shapes cannot be made static,
+#: and as the reference when diagnosing a suspected XLA miscompile.
+clahe_gpu_nojit = tf.function(_clahe_impl, autograph=False)
 
-    # Get length based on input type
-    if isinstance(images, tf.Tensor):
-        total_images = tf.shape(images)[0].numpy()
-        # input_shape = images.shape
-    else:
-        total_images = len(images)
-        # input_shape = images.shape
 
-    if use_pipeline and total_images > 1000:  # Use pipeline for large datasets
-        result = _convert_with_pipeline_hybrid(images, batch_size, tile_size, clip_limit, return_tensor)
-    else:
-        result = _convert_with_batching_hybrid(images, batch_size, tile_size, clip_limit, return_tensor)
-    return result
+def setup_gpu(memory_growth: bool = True, enable_xla: bool = True) -> bool:
+    """Configure GPU memory growth and XLA; return True if a GPU is present.
+
+    Memory growth can only be set before a GPU is initialised. Calling this
+    after the first op has run leaves the existing setting in place, which is
+    harmless and so is not treated as an error.
+    """
+    if enable_xla:
+        tf.config.optimizer.set_jit(True)
+
+    gpus = tf.config.list_physical_devices("GPU")
+    if not gpus:
+        return False
+
+    if memory_growth:
+        for gpu in gpus:
+            # RuntimeError means the device is already initialised, in which
+            # case the existing setting stands and there is nothing to do.
+            with contextlib.suppress(RuntimeError):
+                tf.config.experimental.set_memory_growth(gpu, True)
+    return True

@@ -1,20 +1,39 @@
-"""
-GPU-accelerated CLAHE implementation for tensorflow.
-Author: Bahador Mirzazadeh - Atefe Rostami
-Date: 2025-08-14
+"""GPU-accelerated CLAHE for TensorFlow.
+
+Authors: Bahador Mirzazadeh, Atefe Rostami
+
+Quick start::
+
+    import numpy as np
+    import gpu_clahe
+
+    images = np.random.randint(0, 256, (1000, 512, 512), dtype=np.uint8)
+    enhanced = gpu_clahe.convert_clahe(images)
+
+See :mod:`gpu_clahe.core` for the parameter conventions - in particular that
+``clip_limit`` is a fraction of the pixels in a tile, not OpenCV's ``clipLimit``.
 """
 
-from .core import clahe_gpu, convert_clahe, setup_gpu
-from .utils import validate_input, benchmark_performance
-from .config import CLAHEConfig
-from .version import __version__
+from .api import convert_clahe
+from .benchmark import benchmark_opencv, benchmark_performance
+from .config import CLAHEConfig, total_gpu_memory_mb
+from .core import clahe_gpu, clahe_gpu_nojit, setup_gpu
+from .utils import get_gpu_info, require_valid_input, validate_input
+from .version import __author__, __email__, __version__
 
 __all__ = [
-    'clahe_gpu',
-    'convert_clahe',
-    'setup_gpu',
-    'validate_input',
-    'benchmark_performance',
-    'CLAHEConfig',
-    '__version__'
+    "CLAHEConfig",
+    "__author__",
+    "__email__",
+    "__version__",
+    "benchmark_opencv",
+    "benchmark_performance",
+    "clahe_gpu",
+    "clahe_gpu_nojit",
+    "convert_clahe",
+    "get_gpu_info",
+    "require_valid_input",
+    "setup_gpu",
+    "total_gpu_memory_mb",
+    "validate_input",
 ]
