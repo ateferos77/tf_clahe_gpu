@@ -505,11 +505,12 @@ build job that installs the wheel from a temporary directory and smoke-tests it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Changelog
+## Upgrading from 1.x
 
-See [CHANGELOG.md](CHANGELOG.md). **2.0 is a breaking release** — the import name changed,
+**2.0 is a breaking release** — the import name changed from `clahe` to `gpu_clahe`,
 output pixel values shift by up to one grey level, and mis-scaled input is now rejected
-rather than silently mangled.
+rather than silently mangled. See [Parameter conventions](#parameter-conventions) and
+[Limitations](#limitations) for what to check in existing code.
 
 ## License
 

@@ -61,8 +61,8 @@ reproduce.
 ## Releasing
 
 1. Update `__version__` in `gpu_clahe/version.py`.
-2. Add a `CHANGELOG.md` entry. Anything that changes output pixels, rejects input that
-   used to be accepted, or moves a default belongs under **Breaking** — those are the
-   changes a user cannot discover from the API surface.
+2. Summarise the release in the tag annotation. Anything that changes output pixels,
+   rejects input that used to be accepted, or moves a default is **breaking** — those are
+   the changes a user cannot discover from the API surface, so call them out explicitly.
 3. Tag `vX.Y.Z`. The release workflow checks the tag matches `__version__`, builds, and
    publishes to PyPI via trusted publishing.
