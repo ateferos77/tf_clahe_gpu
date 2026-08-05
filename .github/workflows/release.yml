@@ -16,10 +16,18 @@ jobs:
       - name: Check the tag matches the package version
         # A tag that disagrees with gpu_clahe.version is the easiest way to
         # publish something mislabelled, and it is trivial to catch here.
+        #
+        # version.py is read as a standalone file rather than imported as
+        # gpu_clahe.version: importing the submodule executes the package
+        # __init__, which pulls in TensorFlow, and TensorFlow is deliberately
+        # not installed in this job. runpy keeps the check dependency-free,
+        # which is the same property that lets setuptools resolve the version
+        # at build time.
         run: |
           python -m pip install --upgrade pip build
           TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(python -c 'import gpu_clahe.version as v; print(v.__version__)')"
+          PKG="$(python -c 'import runpy; print(runpy.run_path("gpu_clahe/version.py")["__version__"])')"
+          echo "tag=$TAG package=$PKG"
           if [ "$TAG" != "$PKG" ]; then
             echo "::error::tag v$TAG does not match __version__ $PKG"
             exit 1
