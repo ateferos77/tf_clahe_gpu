@@ -1,0 +1,34 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # mypy runs from the project environment rather than an isolated one pinned to
+  # a rev here. A pinned rev drifts from the unbounded `mypy>=1.8` that CI
+  # installs, and that drift is not theoretical: pre-commit on mypy 1.x accepted
+  # `python_version = "3.9"` while CI on mypy 2.x rejected it outright, so the
+  # local gate passed and CI failed. Sharing one interpreter removes the gap.
+  # Requires `pip install -e ".[dev]"` first; see CONTRIBUTING.md.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [gpu_clahe, tests, benchmarks]
