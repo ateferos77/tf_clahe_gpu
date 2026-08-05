@@ -52,7 +52,12 @@ dependencies = [
 # hard dependency; the package runs (slowly) on CPU without them.
 gpu = ["tensorflow[and-cuda]>=2.12"]
 test = [
-    "opencv-python>=4.5",
+    # Headless: cv2 is used only for createCLAHE/imread, never for a window, and
+    # the GUI build needs X11 (libxcb) at import time. In a slim container that
+    # is not an unmet optional - the import raises ImportError, which pytest
+    # >=8.2 deliberately refuses to treat as "not installed", so the OpenCV
+    # cross-checks fail rather than skip.
+    "opencv-python-headless>=4.5",
     "pytest>=7.0",
     "pytest-cov>=4.0",
 ]
