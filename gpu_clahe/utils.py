@@ -20,6 +20,32 @@ _SUPPORTED_DTYPES = (
 )
 
 
+_MAX_VALUE = 255.0
+
+
+def _check_scale(peak: float, is_floating: bool) -> tuple[bool, str]:
+    """Check that the sample values sit on the ``[0, 255]`` scale the kernel assumes.
+
+    Both failures here are silent at every other layer: the kernel clamps to
+    ``[0, 255]`` and carries on, so a mis-scaled image produces a plausible-
+    looking tensor of the right shape and dtype containing nothing.
+    """
+    if is_floating and 0.0 < peak <= 1.0:
+        return False, (
+            f"Float input peaks at {peak:.3f}, which looks like a [0, 1] "
+            "normalised image. Values are interpreted on a [0, 255] scale; "
+            "multiply by 255 first."
+        )
+    if not is_floating and peak > _MAX_VALUE:
+        return False, (
+            f"Integer input peaks at {peak:.0f}, above the [0, 255] scale values "
+            "are interpreted on. Everything above 255 would be clipped, not "
+            "rescaled - a 12-bit image collapses almost entirely to one value. "
+            "Rescale first, e.g. image / image.max() * 255."
+        )
+    return True, ""
+
+
 def validate_input(images: np.ndarray | tf.Tensor) -> tuple[bool, str]:
     """Check that ``images`` is something the kernel can process.
 
@@ -44,6 +70,19 @@ def validate_input(images: np.ndarray | tf.Tensor) -> tuple[bool, str]:
                 f"Height and width must be static, got shape {shape}. "
                 "Call set_shape((None, H, W)) before processing."
             )
+        if images.dtype.as_numpy_dtype not in _SUPPORTED_DTYPES:
+            supported = ", ".join(dt.__name__ for dt in _SUPPORTED_DTYPES)
+            return False, (
+                f"Unsupported dtype {images.dtype.name}; expected one of: {supported}."
+            )
+        if shape[0] == 0:
+            return False, "Empty image array."
+        # The scale check needs actual values. Inside a graph there are none, so
+        # it is skipped rather than faked; eagerly, reduce_max stays on device
+        # instead of copying the batch to the host just to look at one number.
+        if tf.executing_eagerly() and shape[0] is not None:
+            peak = float(tf.reduce_max(tf.cast(images, tf.float32)))
+            return _check_scale(peak, images.dtype.is_floating)
         return True, ""
 
     if not isinstance(images, np.ndarray):
@@ -67,20 +106,9 @@ def validate_input(images: np.ndarray | tf.Tensor) -> tuple[bool, str]:
         supported = ", ".join(dt.__name__ for dt in _SUPPORTED_DTYPES)
         return False, f"Unsupported dtype {images.dtype}; expected one of: {supported}."
 
-    # The most common silent failure: a float image normalised to [0, 1] is
-    # clamped to the bottom two LUT bins and comes out as noise, with no error
-    # anywhere. Only worth checking for floats, and only when the array is
-    # genuinely non-trivial.
-    if np.issubdtype(images.dtype, np.floating):
-        peak = float(np.max(images))
-        if 0.0 < peak <= 1.0:
-            return False, (
-                f"Float input peaks at {peak:.3f}, which looks like a [0, 1] "
-                "normalised image. Values are interpreted on a [0, 255] scale; "
-                "multiply by 255 first."
-            )
-
-    return True, ""
+    return _check_scale(
+        float(np.max(images)), bool(np.issubdtype(images.dtype, np.floating))
+    )
 
 
 def require_valid_input(images: np.ndarray | tf.Tensor) -> None:

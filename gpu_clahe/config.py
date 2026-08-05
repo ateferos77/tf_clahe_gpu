@@ -16,7 +16,29 @@ __all__ = ["CLAHEConfig", "total_gpu_memory_mb"]
 # tile-major copy and the float32 accumulator concurrently; XLA fuses the four
 # gathers so they do not each add a buffer. Four live int32-sized buffers, then
 # rounded up to six for headroom against allocator fragmentation.
-_BYTES_PER_PIXEL_WORKING_SET = 4 * 6
+_DENSE_BYTES_PER_PIXEL = 4 * 6
+
+_NUM_BINS = 256
+
+# Live histogram-space buffers: raw counts, clipped counts, cumulative sum.
+_HISTOGRAM_BUFFERS = 3
+
+
+def _bytes_per_pixel(tile_size: int) -> int:
+    """Per-pixel working set in bytes, for a given tile size.
+
+    The histogram buffers are ``(batch, n_tiles, 256)`` int32, and ``n_tiles``
+    is ``pixels / tile_size ** 2`` - so their per-pixel cost scales inversely
+    with the tile area and cannot be folded into a single constant. At the
+    default ``tile_size=32`` it is 3 B/px against 24 for the dense buffers, i.e.
+    noise. At ``tile_size=8`` it is 48 B/px, which is *twice* everything else
+    put together, and at 4 it is 192. Ignoring it made the estimate 9x
+    optimistic on small tiles, which is an out-of-memory error rather than a
+    slightly wrong number.
+    """
+    histogram = _HISTOGRAM_BUFFERS * _NUM_BINS * 4 // (tile_size * tile_size)
+    return _DENSE_BYTES_PER_PIXEL + histogram
+
 
 # Never hand the whole card to one batch: the CUDA context, cuDNN workspaces and
 # any co-resident model need room too.
@@ -44,6 +66,13 @@ def total_gpu_memory_mb() -> int:
     (``tf.config.experimental.get_memory_info``), never the device total, so
     this shells out to ``nvidia-smi``. A missing or uncooperative ``nvidia-smi``
     yields 0, which callers read as "unknown" rather than "no memory".
+
+    Reports ``nvidia-smi``'s *first* device, which is not necessarily the one
+    TensorFlow will use: ``nvidia-smi`` ignores ``CUDA_VISIBLE_DEVICES`` and
+    enumerates in PCI order, while CUDA orders by its own heuristic. On a host
+    with cards of differing size this can name the wrong one, so the figure is
+    only dependable when the GPUs are identical - which is why it feeds a
+    conservative batch-size heuristic rather than a hard allocation.
     """
     if not tf.config.list_physical_devices("GPU"):
         return 0
@@ -97,12 +126,17 @@ class CLAHEConfig:
         if self.clip_limit <= 0:
             raise ValueError(f"clip_limit must be > 0, got {self.clip_limit}.")
 
-    def auto_batch_size(self, image_shape: Sequence[int]) -> int:
+    def auto_batch_size(
+        self, image_shape: Sequence[int], tile_size: int | None = None
+    ) -> int:
         """Pick a batch size whose working set fits in VRAM.
 
         Args:
             image_shape: Shape of the whole dataset, ``(N, H, W)`` or
                 ``(N, H, W, C)``.
+            tile_size: Tile size the batch will actually be processed at, which
+                drives the histogram memory. ``None`` uses this config's own
+                ``tile_size``.
 
         Returns:
             A batch size in ``[1, N]``, falling back to a conservative default
@@ -121,8 +155,11 @@ class CLAHEConfig:
         if total_mb <= 0:
             return max(1, min(_FALLBACK_BATCH_SIZE, count))
 
+        effective_tile = self.tile_size if tile_size is None else tile_size
         height, width = int(image_shape[1]), int(image_shape[2])
-        per_image_mb = (height * width * _BYTES_PER_PIXEL_WORKING_SET) / (1024 * 1024)
+        per_image_mb = (height * width * _bytes_per_pixel(effective_tile)) / (
+            1024 * 1024
+        )
         if per_image_mb <= 0:
             return max(1, min(_FALLBACK_BATCH_SIZE, count))
 

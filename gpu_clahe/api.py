@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from .config import CLAHEConfig
 from .core import clahe_gpu, setup_gpu
+from .utils import require_valid_input
 
 __all__ = ["ImageArray", "convert_clahe"]
 
@@ -66,12 +67,9 @@ def _run_batched(
             clip_limit=clip_limit,
             dtype=dtype,
         )
-        # Slicing a full batch would add a device op for nothing, and the
-        # partial case only arises once, on the tail.
-        if stop - start == batch_size:
-            out[start:stop] = processed.numpy()
-        else:
-            out[start:stop] = processed.numpy()[: stop - start]
+        # The slice is a host-side view and only trims anything on the tail
+        # batch, so there is nothing to branch on.
+        out[start:stop] = processed.numpy()[: stop - start]
 
 
 def _run_pipeline(
@@ -86,6 +84,10 @@ def _run_pipeline(
 
     ``drop_remainder=True`` keeps every batch the same static shape (so XLA
     compiles once); the leftover tail is handled by the batched path afterwards.
+
+    Costs a second copy of the dataset: ``from_tensor_slices`` materialises the
+    array it is handed, on top of the input and the output buffer. For anything
+    close to filling host RAM, the plain batched path is the one that fits.
     """
     total = len(images)
     remainder = total % batch_size
@@ -122,6 +124,7 @@ def convert_clahe(
     return_tensor: bool = False,
     dtype: tf.DType | None = None,
     config: CLAHEConfig | None = None,
+    validate: bool = True,
 ) -> ImageArray:
     """Apply CLAHE to a whole dataset, batching to fit in GPU memory.
 
@@ -144,12 +147,18 @@ def convert_clahe(
         config: Supplies defaults for ``tile_size``, ``clip_limit``, ``dtype``,
             ``memory_growth`` and ``enable_xla``. Any argument passed
             explicitly still wins, including one that equals the default.
+        validate: Run :func:`gpu_clahe.validate_input` first. On by default: the
+            failure it catches - values that are not on a ``[0, 255]`` scale -
+            is otherwise completely silent, since the kernel clamps and returns
+            an array of the right shape and dtype containing nothing. Pass
+            ``False`` only to skip the check knowingly.
 
     Returns:
         Processed images in the requested container, same shape as the input.
 
     Raises:
-        ValueError: If ``images`` is empty or ``batch_size`` is not positive.
+        ValueError: If ``images`` is empty, ``batch_size`` is not positive, or
+            ``validate`` is set and the input fails validation.
     """
     # ``None`` means "not supplied", so an explicit argument wins even when it
     # happens to equal the default. Detecting that by comparing against the
@@ -172,16 +181,21 @@ def convert_clahe(
     if total == 0:
         raise ValueError("Cannot process an empty image array.")
 
+    # Materialise on the host once: both paths slice it repeatedly, and slicing
+    # a device tensor per batch would round-trip through the GPU needlessly.
+    # Done before validating so the check always runs against the array, whose
+    # value-range test is the stricter of the two.
+    if isinstance(images, tf.Tensor):
+        images = images.numpy()
+
+    if validate:
+        require_valid_input(images)
+
     if batch_size is None:
-        batch_size = defaults.auto_batch_size(tuple(images.shape))
+        batch_size = defaults.auto_batch_size(tuple(images.shape), tile_size)
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}.")
     batch_size = min(batch_size, total)
-
-    # Materialise on the host once: both paths slice it repeatedly, and slicing
-    # a device tensor per batch would round-trip through the GPU needlessly.
-    if isinstance(images, tf.Tensor):
-        images = images.numpy()
 
     out = np.empty(images.shape, dtype=dtype.as_numpy_dtype)
     runner = _run_pipeline if use_pipeline else _run_batched
