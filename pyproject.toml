@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=61"]
+# >=77 for PEP 639 license expressions (`license = "MIT"` + `license-files`).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +9,10 @@ dynamic = ["version"]
 description = "GPU-accelerated CLAHE for TensorFlow"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+# PEP 639 SPDX expression. The old `{ text = "MIT" }` table form is deprecated
+# in setuptools >=77, and a `License ::` classifier alongside this is an error.
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Bahador Mirzazadeh", email = "baha2r.mirzazadeh98@gmail.com" },
     { name = "Atefe Rostami", email = "ateferos77@gmail.com" },
@@ -26,7 +30,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -140,7 +143,11 @@ convention = "google"
 exclude = ["*.md"]
 
 [tool.mypy]
-python_version = "3.9"
+# Not 3.9, despite requires-python: mypy >=2 refuses any target below 3.10, and
+# NumPy's stubs use PEP 695 `type` statements that need a 3.12 target. Real 3.9
+# compatibility is enforced by ruff's target-version and by CI running the suite
+# on 3.9 - this setting only picks the stdlib/syntax model mypy analyses against.
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -149,12 +156,14 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-# Neither ships type stubs complete enough to check against.
-module = ["tensorflow.*", "cv2.*"]
+# None of these ship type stubs complete enough to check against.
+module = ["tensorflow.*", "cv2.*", "matplotlib.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["tests.*", "benchmarks.*"]
+# `benchmarks/` has no __init__.py by design, so mypy names those modules by
+# basename - `benchmarks.*` never matched anything and silently did nothing.
+module = ["tests.*", "make_figures", "run_benchmark"]
 disallow_untyped_defs = false
 
 [tool.coverage.run]

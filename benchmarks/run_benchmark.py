@@ -14,7 +14,12 @@ import argparse
 import json
 import sys
 
-from gpu_clahe import benchmark_opencv, benchmark_performance, get_gpu_info
+from gpu_clahe import (
+    benchmark_opencv,
+    benchmark_performance,
+    environment,
+    get_gpu_info,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -60,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  no GPU visible - the numbers below are CPU timings")
     print()
 
-    payload: dict[str, object] = {"environment": info, "sweeps": []}
+    sweeps: list[dict[str, object]] = []
 
     for size in args.sizes:
         print(f"=== {size}x{size} ===")
@@ -106,7 +111,9 @@ def main(argv: list[str] | None = None) -> int:
                     entry["speedup_vs_opencv"] = speedup
                 entry["opencv"] = vars(baseline)
         print()
-        payload["sweeps"].append(entry)
+        sweeps.append(entry)
+
+    payload = {"environment": environment(), "sweeps": sweeps}
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:

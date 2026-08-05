@@ -14,6 +14,7 @@ that.
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
 NUM_BINS = 256
 MAX_VALUE = 255.0
@@ -73,8 +74,8 @@ def reference_luts(
 
     # Integer round-half-up, matching the kernel exactly. See the note in
     # gpu_clahe.core._build_luts on why this is not done in floating point.
-    lut = (2 * 255 * numerator + span) // (2 * span)
-    return np.clip(lut, 0, 255).astype(np.int32)
+    lut: np.ndarray = np.clip((2 * 255 * numerator + span) // (2 * span), 0, 255)
+    return lut.astype(np.int32)
 
 
 def axis_weights(
@@ -97,7 +98,7 @@ def clahe_reference(
     images: np.ndarray,
     tile_size: int = 32,
     clip_limit: float = 0.035,
-    dtype: np.dtype = np.uint8,
+    dtype: npt.DTypeLike = np.uint8,
 ) -> np.ndarray:
     """CLAHE on a ``(B, H, W)`` array, matching :func:`gpu_clahe.clahe_gpu`."""
     values = quantise(images)
@@ -124,4 +125,5 @@ def clahe_reference(
 
     if np.issubdtype(dtype, np.integer):
         result = np.round(result)
-    return np.clip(result, 0.0, MAX_VALUE).astype(dtype)
+    clipped: np.ndarray = np.clip(result, 0.0, MAX_VALUE)
+    return clipped.astype(dtype)

@@ -35,7 +35,9 @@ jobs:
       - name: Ruff (format)
         run: ruff format --check .
       - name: Mypy
-        run: mypy gpu_clahe
+        # Tests and benchmarks are checked too: the relaxed overrides in
+        # pyproject.toml only mean anything if these paths are actually visited.
+        run: mypy gpu_clahe tests benchmarks
 
   test:
     name: Test (py${{ matrix.python-version }}, ${{ matrix.os }})

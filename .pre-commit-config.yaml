@@ -11,17 +11,24 @@ repos:
       - id: trailing-whitespace
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
+    rev: v0.16.1
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
+  # mypy runs from the project environment rather than an isolated one pinned to
+  # a rev here. A pinned rev drifts from the unbounded `mypy>=1.8` that CI
+  # installs, and that drift is not theoretical: pre-commit on mypy 1.x accepted
+  # `python_version = "3.9"` while CI on mypy 2.x rejected it outright, so the
+  # local gate passed and CI failed. Sharing one interpreter removes the gap.
+  # Requires `pip install -e ".[dev]"` first; see CONTRIBUTING.md.
+  - repo: local
     hooks:
       - id: mypy
-        files: ^gpu_clahe/
-        # TensorFlow is far too heavy to install into the hook's isolated env;
-        # the ignore_missing_imports override in pyproject.toml covers it.
-        additional_dependencies: [numpy]
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: [gpu_clahe, tests, benchmarks]

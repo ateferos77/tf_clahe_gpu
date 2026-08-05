@@ -22,7 +22,13 @@ import tensorflow as tf
 from .core import clahe_gpu, setup_gpu
 from .utils import get_gpu_info
 
-__all__ = ["BenchmarkResult", "benchmark_opencv", "benchmark_performance", "sync"]
+__all__ = [
+    "BenchmarkResult",
+    "benchmark_opencv",
+    "benchmark_performance",
+    "environment",
+    "sync",
+]
 
 
 def sync() -> None:
@@ -86,7 +92,13 @@ class BenchmarkReport:
         }
 
 
-def _environment() -> dict[str, Any]:
+def environment() -> dict[str, Any]:
+    """GPU/TF info plus the Python version and platform.
+
+    Public because a throughput number is only meaningful alongside the machine
+    that produced it, so anything writing a benchmark artefact should record
+    this rather than the narrower :func:`gpu_clahe.get_gpu_info`.
+    """
     info = get_gpu_info()
     info["python"] = platform.python_version()
     info["platform"] = platform.platform()
@@ -152,7 +164,7 @@ def benchmark_performance(
     rng = np.random.default_rng(seed)
     images = rng.integers(0, 256, size=(num_images, height, width), dtype=np.uint8)
 
-    report = BenchmarkReport(environment=_environment())
+    report = BenchmarkReport(environment=environment())
 
     for batch_size in batch_sizes:
         if batch_size > num_images:
