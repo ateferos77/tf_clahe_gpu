@@ -71,6 +71,43 @@ def test_environment_is_recorded(small_report) -> None:
     assert environment["tensorflow_version"]
     assert "num_gpus" in environment
     assert environment["platform"]
+    assert environment["python"]
+    assert "driver_version" in environment
+
+
+def test_parameters_are_recorded(small_report) -> None:
+    """A result must carry the settings that produced it.
+
+    Without these a serialised benchmark cannot be checked against the claim it
+    is quoted to support: a median is meaningless without its repeat count, and
+    a throughput figure without its tile size is not reproducible.
+    """
+    for result in small_report.results:
+        assert result.num_repeats == 2
+        assert result.tile_size == 32
+        assert result.clip_limit == pytest.approx(0.035)
+
+
+def test_opencv_baseline_records_its_parameters() -> None:
+    result = benchmark_opencv(
+        image_shape=(32, 32), num_images=2, num_repeats=1, tile_size=16
+    )
+    if result is None:
+        pytest.skip("opencv-python not installed")
+    assert result.num_repeats == 1
+    assert result.tile_size == 16
+
+
+def test_tiny_request_still_measures_something() -> None:
+    """Fewer images than the smallest default batch must not yield nothing.
+
+    An empty report reads as a failed run rather than an over-small request.
+    """
+    report = benchmark_performance(
+        image_shape=(32, 32), num_images=4, num_repeats=1, warmup_repeats=1
+    )
+    assert report.results
+    assert report.best() is not None
 
 
 def test_report_is_json_serialisable(small_report) -> None:

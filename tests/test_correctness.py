@@ -7,7 +7,7 @@ import pytest
 import tensorflow as tf
 
 import gpu_clahe
-from gpu_clahe.core import _tile_axis_weights
+from gpu_clahe.core import _pad_symmetric, _tile_axis_weights
 
 from .reference import clahe_reference, reference_luts
 
@@ -92,6 +92,50 @@ def test_dynamic_batch_uses_the_one_hot_histogram(uniform_noise: np.ndarray) -> 
 
     actual = run(tf.constant(uniform_noise)).numpy()
     np.testing.assert_array_equal(actual, clahe_reference(uniform_noise))
+
+
+def test_jit_kernel_accepts_a_dynamic_batch(uniform_noise: np.ndarray) -> None:
+    """The XLA kernel itself must handle an unknown batch size.
+
+    The other dynamic-batch test goes through ``clahe_gpu_nojit``, which is a
+    different code path: without XLA nothing fuses the one-hot into the
+    reduction, so the ``(B, T, P, 256)`` intermediate really is materialised.
+    That is the configuration whose memory cost the one-hot docstring warns
+    about, and it is not the one users get from ``clahe_gpu``. This pins the
+    compiled path, which is the one the warning assumes.
+    """
+    signature = [tf.TensorSpec([None, *uniform_noise.shape[1:]], tf.uint8)]
+
+    @tf.function(input_signature=signature, autograph=False)
+    def run(images: tf.Tensor) -> tf.Tensor:
+        return gpu_clahe.clahe_gpu(images)
+
+    actual = run(tf.constant(uniform_noise)).numpy()
+    np.testing.assert_array_equal(actual, clahe_reference(uniform_noise))
+
+
+@pytest.mark.parametrize(
+    ("height", "width"), [(1, 1), (3, 5), (8, 9), (31, 33), (5, 2), (2, 7), (64, 64)]
+)
+@pytest.mark.parametrize("tile_size", [8, 32, 64])
+def test_padding_matches_numpy_symmetric(
+    rng: np.random.Generator, height: int, width: int, tile_size: int
+) -> None:
+    """``_pad_symmetric`` must equal ``np.pad(mode="symmetric")`` exactly.
+
+    ``tf.pad`` rejects a SYMMETRIC pad wider than the axis, so this applies the
+    padding in chunks. That is only correct because symmetric padding repeats
+    with period ``2 * dim`` - true, but not obvious, and asserted here directly
+    rather than inferred from the end-to-end results.
+    """
+    n_y, n_x = -(-height // tile_size), -(-width // tile_size)
+    pad_y, pad_x = n_y * tile_size - height, n_x * tile_size - width
+
+    images = rng.integers(0, 256, size=(2, height, width)).astype(np.int32)
+    padded = _pad_symmetric(tf.constant(images), pad_y, pad_x).numpy()
+    expected = np.pad(images, ((0, 0), (0, pad_y), (0, pad_x)), mode="symmetric")
+
+    np.testing.assert_array_equal(padded, expected)
 
 
 def test_one_hot_and_scatter_histograms_agree(rng: np.random.Generator) -> None:

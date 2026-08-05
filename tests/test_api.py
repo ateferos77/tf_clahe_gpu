@@ -141,6 +141,51 @@ def test_empty_input_is_rejected() -> None:
         gpu_clahe.convert_clahe(np.zeros((0, 32, 32), dtype=np.uint8))
 
 
+def test_zero_to_one_floats_are_rejected(rng: np.random.Generator) -> None:
+    """The driver must not silently destroy a mis-scaled image.
+
+    Values are read on a [0, 255] scale, so a [0, 1] normalised float image is
+    clamped into the bottom LUT bin and comes back as a single flat value - a
+    solid black frame of the right shape and dtype. validate_input has always
+    detected this; until it was wired in here, nothing ever called it.
+    """
+    images = rng.random((4, 32, 32)).astype(np.float32)
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        gpu_clahe.convert_clahe(images)
+
+
+def test_integers_above_255_are_rejected(rng: np.random.Generator) -> None:
+    """12-bit input is clipped, not rescaled, and must not pass quietly."""
+    images = rng.integers(0, 4096, size=(4, 32, 32)).astype(np.uint16)
+    with pytest.raises(ValueError, match="Rescale"):
+        gpu_clahe.convert_clahe(images)
+
+
+def test_validation_can_be_turned_off(rng: np.random.Generator) -> None:
+    """The check is a guard rail, not a wall: opting out stays possible."""
+    images = rng.random((4, 32, 32)).astype(np.float32)
+    result = gpu_clahe.convert_clahe(images, validate=False)
+    assert result.shape == images.shape
+    # Exactly the collapse the check exists to prevent.
+    assert len(np.unique(result)) == 1
+
+
+def test_validation_leaves_well_formed_input_alone(rng: np.random.Generator) -> None:
+    """Validation must not change results for input that was always fine."""
+    images = rng.integers(0, 256, size=(6, 48, 48), dtype=np.uint8)
+    checked = gpu_clahe.convert_clahe(images, batch_size=2)
+    unchecked = gpu_clahe.convert_clahe(images, batch_size=2, validate=False)
+    np.testing.assert_array_equal(checked, unchecked)
+    np.testing.assert_array_equal(checked, clahe_reference(images))
+
+
+def test_tensor_input_is_validated_too(rng: np.random.Generator) -> None:
+    """A tf.Tensor must not be a way around the check."""
+    images = tf.constant(rng.random((4, 32, 32)).astype(np.float32))
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        gpu_clahe.convert_clahe(images)
+
+
 @pytest.mark.parametrize("batch_size", [0, -1])
 def test_non_positive_batch_size_is_rejected(
     rng: np.random.Generator, batch_size: int
