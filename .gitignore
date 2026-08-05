@@ -23,7 +23,6 @@ htmlcov/
 /benchmark_results.json
 
 # Kept locally, deliberately not published yet.
-CHANGELOG.md
 IMPLEMENTATION_NOTES.md
 
 # Local scratch: see the walkthrough in the project notes.

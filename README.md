@@ -2,7 +2,7 @@
 
 **GPU-accelerated CLAHE (Contrast Limited Adaptive Histogram Equalization) for TensorFlow.**
 
-[![CI](https://github.com/Baha2rM98/gpu-clahe/actions/workflows/ci.yml/badge.svg)](https://github.com/Baha2rM98/gpu-clahe/actions/workflows/ci.yml)
+[![CI](https://github.com/ateferos77/tf_clahe_gpu/actions/workflows/ci.yml/badge.svg)](https://github.com/ateferos77/tf_clahe_gpu/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
@@ -58,7 +58,21 @@ pip install "gpu-clahe[gpu]"     # also pulls the CUDA 12 runtime wheels (~3.5 G
 
 Requires Python 3.9+ and TensorFlow 2.12+.
 
-### If the GPU is not detected after `[gpu]`
+### GPU support requires Linux or WSL2
+
+TensorFlow dropped native-Windows GPU support at 2.11, and this package needs 2.12+, so
+**on Windows there is no configuration that reaches the GPU** — CUDA installed or not.
+TensorFlow says so itself on import:
+
+```
+TensorFlow GPU support is not available on native Windows for TensorFlow >= 2.11.
+Even if CUDA/cuDNN are installed, GPU will not be used. Please use WSL2 [...]
+```
+
+Everything still runs correctly on Windows, just on the CPU. For GPU throughput, use
+Linux or run inside WSL2. The published benchmarks were measured on Linux.
+
+### If the GPU is not detected after `[gpu]` (Linux)
 
 TensorFlow can fail to load the pip-installed CUDA libraries, because they live under
 `site-packages/nvidia/*/lib/` — a path the dynamic loader does not search by default.
@@ -119,10 +133,13 @@ from gpu_clahe import CLAHEConfig, convert_clahe
 config = CLAHEConfig(tile_size=16, clip_limit=0.02)
 enhanced = convert_clahe(images, config=config)
 
-batch_size = config.auto_batch_size(images.shape)   # sized from available VRAM
+batch_size = config.auto_batch_size(images.shape)   # sized from VRAM and tile_size
 ```
 
 Explicit arguments always beat `config`, including when they equal the default.
+
+Batch sizing accounts for `tile_size`, because the per-tile histograms are the dominant
+buffer once tiles get small: 3 B/pixel at `tile_size=32`, but 48 at 8 and 192 at 4.
 
 ---
 
@@ -351,15 +368,17 @@ This is not automatic. Two properties make it hold, and both are load-bearing:
 
 | Function | Purpose |
 |---|---|
-| `convert_clahe(images, ...)` | Whole-dataset entry point; batches automatically. |
+| `convert_clahe(images, ...)` | Whole-dataset entry point; batches automatically. Validates input unless `validate=False`. |
 | `clahe_gpu(images, tile_size, clip_limit, dtype)` | The XLA kernel. `(B,H,W)` or `(B,H,W,1)` tensor. |
 | `clahe_gpu_nojit(...)` | Non-XLA twin, for dynamic shapes or diagnosing a miscompile. |
-| `CLAHEConfig(...)` | Parameter bundle with `auto_batch_size()`. |
+| `CLAHEConfig(...)` | Parameter bundle with `auto_batch_size(shape, tile_size=None)`. |
 | `setup_gpu(memory_growth, enable_xla)` | Configure the device; returns whether a GPU exists. |
 | `validate_input(images)` | `(is_valid, message)`. Never raises. |
 | `require_valid_input(images)` | Raises `ValueError` instead. |
 | `get_gpu_info()` | TF version, CUDA flag, per-device name and compute capability. |
+| `environment()` | The above plus Python, platform and driver — what a benchmark artefact records. |
 | `total_gpu_memory_mb()` | Device total via `nvidia-smi`; 0 if unavailable. |
+| `gpu_driver_version()` | NVIDIA driver version via `nvidia-smi`; `None` if unavailable. |
 | `benchmark_performance(...)` | Synchronized throughput sweep → `BenchmarkReport`. |
 | `benchmark_opencv(...)` | Single-threaded CPU baseline → `BenchmarkResult`. |
 
@@ -370,26 +389,31 @@ Accepted input dtypes: `uint8`, `uint16`, `int16`, `int32`, `float16`, `float32`
 ## Limitations
 
 1. **Values are interpreted on a `[0, 255]` scale regardless of dtype, and out-of-range
-   values are clipped rather than rescaled.** This is the sharpest edge in the package. A
-   12-bit DICOM radiograph (0–4095) passes `validate_input` without complaint, and then
-   **93.8% of it collapses to a single value**. Rescale first:
+   values are clipped rather than rescaled.** A 12-bit DICOM radiograph (0–4095) has
+   **~94% of it collapse onto a single value**. Rescale first:
 
    ```python
    scaled = image.astype(np.float32) / image.max() * 255
    ```
 
-   `validate_input` does catch the mirror-image case — a float image normalized to `[0, 1]` —
-   but it does not currently check integer inputs for values above 255.
+   `convert_clahe` now rejects both this and its mirror image — a float image normalized to
+   `[0, 1]`, which otherwise comes back as a solid black frame. Pass `validate=False` to opt
+   out. `clahe_gpu` is the raw kernel and does **not** check: it clips and continues.
 
 2. **`convert_clahe` requires the whole dataset in host RAM.** It allocates the full output
    array and indexes the input directly. A million 512×512 images is 262 GB. Batching *within*
    a run is correct and tested; true streaming would need a generator or file-backed API.
+   `use_pipeline=True` costs a further full copy, since `tf.data.from_tensor_slices`
+   materializes the array it is given.
 
 3. **Single channel only.** Colour requires converting to LAB and applying to the L channel
    manually. Rejected explicitly rather than silently mishandled.
 
 4. **Height and width must be static.** Required by XLA. The batch size may be dynamic, but a
-   dynamic batch selects a histogram path roughly 12× slower.
+   dynamic batch selects a histogram path roughly 12× slower — and one that depends on XLA
+   fusing away its `(B, tiles, pixels, 256)` intermediate. Under `clahe_gpu` (JIT) that
+   fusion happens. Under `clahe_gpu_nojit` it does not, so the intermediate is real: about
+   8.6 GB for a 32×512×512 batch. Prefer a static batch, or stay on the JIT path.
 
 5. **Redistribution is single-pass.** Excess clipped mass is spread once and the integer
    remainder dropped; it is not re-clipped, and the remainder is not distributed with OpenCV's
@@ -405,7 +429,7 @@ Accepted input dtypes: `uint8`, `uint16`, `int16`, `int32`, `float16`, `float32`
 ```bash
 pip install -e ".[dev]"
 
-pytest                                                    # 131 tests
+pytest                                                    # 185 tests
 python benchmarks/run_benchmark.py --sizes 256 512 1024   # throughput table
 ```
 
@@ -466,8 +490,8 @@ independent reference implementation. The algorithm itself is due to Zuiderveld,
 ## Development
 
 ```bash
-git clone https://github.com/Baha2rM98/gpu-clahe
-cd gpu-clahe
+git clone https://github.com/ateferos77/tf_clahe_gpu
+cd tf_clahe_gpu
 pip install -e ".[dev]"
 pre-commit install
 
@@ -481,6 +505,12 @@ build job that installs the wheel from a temporary directory and smoke-tests it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md). **2.0 is a breaking release** — the import name changed,
+output pixel values shift by up to one grey level, and mis-scaled input is now rejected
+rather than silently mangled.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -491,7 +521,7 @@ MIT — see [LICENSE](LICENSE).
 @software{gpu_clahe,
   author = {Mirzazadeh, Bahador and Rostami, Atefe},
   title  = {GPU-CLAHE: GPU-accelerated CLAHE for TensorFlow},
-  url    = {https://github.com/Baha2rM98/gpu-clahe},
+  url    = {https://github.com/ateferos77/tf_clahe_gpu},
   year   = {2025}
 }
 ```

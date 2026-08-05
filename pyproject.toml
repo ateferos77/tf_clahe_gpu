@@ -65,9 +65,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Baha2rM98/gpu-clahe"
-Repository = "https://github.com/Baha2rM98/gpu-clahe"
-Issues = "https://github.com/Baha2rM98/gpu-clahe/issues"
+Homepage = "https://github.com/ateferos77/tf_clahe_gpu"
+Repository = "https://github.com/ateferos77/tf_clahe_gpu"
+Issues = "https://github.com/ateferos77/tf_clahe_gpu/issues"
 
 [tool.setuptools]
 # Explicit beats auto-discovery here: `benchmarks` and `tests` sit at the top

@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/Baha2rM98/gpu-clahe
-cd gpu-clahe
+git clone https://github.com/ateferos77/tf_clahe_gpu
+cd tf_clahe_gpu
 pip install -e ".[dev]"
 pre-commit install
 ```
@@ -61,5 +61,8 @@ reproduce.
 ## Releasing
 
 1. Update `__version__` in `gpu_clahe/version.py`.
-2. Tag `vX.Y.Z`. The release workflow checks the tag matches `__version__`,
-   builds, and publishes to PyPI via trusted publishing.
+2. Add a `CHANGELOG.md` entry. Anything that changes output pixels, rejects input that
+   used to be accepted, or moves a default belongs under **Breaking** — those are the
+   changes a user cannot discover from the API surface.
+3. Tag `vX.Y.Z`. The release workflow checks the tag matches `__version__`, builds, and
+   publishes to PyPI via trusted publishing.
