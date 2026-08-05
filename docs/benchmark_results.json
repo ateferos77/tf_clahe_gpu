@@ -11,7 +11,9 @@
           5
         ]
       }
-    ]
+    ],
+    "python": "3.9.23",
+    "platform": "Linux-7.0.0-28-generic-x86_64-with-glibc2.39"
   },
   "sweeps": [
     {
@@ -380,5 +382,6 @@
         "megapixels_per_second": 245.13851967056655
       }
     }
-  ]
+  ],
+  "provenance_note": "Produced before the harness recorded its own parameters, so num_repeats, tile_size and clip_limit are not captured here and have deliberately not been backfilled. num_images per timed repeat is recorded on every result (1024). Re-running with the current benchmarks/run_benchmark.py writes a `parameters` block and a `command` string that make a run fully reproducible."
 }

@@ -239,12 +239,11 @@ def fig_opencv(imgs, out):
         )
         best = None
         for ocl in probe:
-            t = np.stack(
-                [
-                    cv2.createCLAHE(clipLimit=float(ocl), tileGridSize=GRID).apply(i)
-                    for i in imgs
-                ]
-            )
+            # One CLAHE object per probe, not per image: the sweep is ~80 probes
+            # x 5 clip levels, so rebuilding it inside the comprehension costs
+            # tens of thousands of constructions for nothing.
+            reference = cv2.createCLAHE(clipLimit=float(ocl), tileGridSize=GRID)
+            t = np.stack([reference.apply(i) for i in imgs])
             m = np.abs(ours.astype(np.int16) - t.astype(np.int16)).mean()
             if best is None or m < best[1]:
                 r = np.corrcoef(
@@ -352,7 +351,7 @@ def fig_throughput(bench_path, out):
     a2.set_title("Against the CPU baseline")
     a2.legend(fontsize=8)
     for i, (g, c) in enumerate(zip(best_rate, cv_rate)):
-        if c == c:
+        if not np.isnan(c):
             a2.text(
                 i,
                 max(g, c) * 1.35,
@@ -366,9 +365,17 @@ def fig_throughput(bench_path, out):
 
     env = payload["environment"]
     gpu = env["gpus"][0]["name"] if env.get("gpus") else "CPU only"
+    # Read the repeat count off the data rather than hardcoding it here, where
+    # it silently goes stale the moment the benchmark is re-run with a different
+    # --repeats. Older files predate the field.
+    repeats = payload.get("parameters", {}).get("num_repeats")
+    if repeats is None:
+        results = [r for s in payload["sweeps"] for r in s["gpu"]["results"]]
+        repeats = results[0].get("num_repeats") if results else None
+    summary = f"median of {repeats} repeats" if repeats else "median of repeated runs"
     fig.suptitle(
         f"Measured on {gpu}, TensorFlow {env['tensorflow_version']} "
-        f"(device-synchronised, median of 5 repeats)",
+        f"(device-synchronised, {summary})",
         fontsize=10,
         y=1.03,
     )

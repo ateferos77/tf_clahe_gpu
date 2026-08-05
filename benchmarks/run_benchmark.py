@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 
 from gpu_clahe import (
     benchmark_opencv,
@@ -52,6 +53,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--json", type=str, default=None, help="write results here")
     return parser.parse_args(argv)
+
+
+def _command_line(args: argparse.Namespace) -> str:
+    """The invocation that reproduces this run, including non-default flags."""
+    parts = [
+        "python benchmarks/run_benchmark.py",
+        f"--sizes {' '.join(str(s) for s in args.sizes)}",
+        f"--num-images {args.num_images}",
+        f"--repeats {args.repeats}",
+        f"--tile-size {args.tile_size}",
+        f"--clip-limit {args.clip_limit}",
+    ]
+    if args.batch_sizes:
+        parts.append(f"--batch-sizes {' '.join(str(b) for b in args.batch_sizes)}")
+    if args.skip_opencv:
+        parts.append("--skip-opencv")
+    return " ".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -109,11 +127,26 @@ def main(argv: list[str] | None = None) -> int:
                     speedup = best.images_per_second / baseline.images_per_second
                     print(f"  speedup: {speedup:.1f}x")
                     entry["speedup_vs_opencv"] = speedup
-                entry["opencv"] = vars(baseline)
+                entry["opencv"] = asdict(baseline)
         print()
         sweeps.append(entry)
 
-    payload = {"environment": environment(), "sweeps": sweeps}
+    # Record the invocation, not just the results: the README quotes these
+    # numbers, and a reader has to be able to reproduce the exact run rather
+    # than guess which flags produced it from the defaults of the day.
+    payload = {
+        "environment": environment(),
+        "parameters": {
+            "sizes": args.sizes,
+            "num_images": args.num_images,
+            "batch_sizes": args.batch_sizes,
+            "tile_size": args.tile_size,
+            "clip_limit": args.clip_limit,
+            "num_repeats": args.repeats,
+        },
+        "command": _command_line(args),
+        "sweeps": sweeps,
+    }
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:

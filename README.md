@@ -270,8 +270,18 @@ Measured on an **NVIDIA GTX 1650** (4 GB, 896 CUDA cores, compute capability 7.5
 card will be substantially faster.
 
 Every figure comes from `benchmarks/run_benchmark.py`, which forces a device
-synchronization before stopping the clock, and reports the **median** of 5 repeats over
-1024 images.
+synchronization before stopping the clock and reports the **median** of repeated passes
+over 1024 images per timed repeat:
+
+```bash
+python benchmarks/run_benchmark.py --sizes 256 512 1024 --num-images 1024 \
+    --json docs/benchmark_results.json
+```
+
+The raw data is committed at [`docs/benchmark_results.json`](docs/benchmark_results.json).
+That file predates the harness recording its own parameters, so it pins the image count
+and the environment but not the repeat count — see `provenance_note` inside it. Runs from
+the current harness embed a `parameters` block and the exact `command`.
 
 ### Kernel throughput — images already resident in GPU memory
 
@@ -293,6 +303,10 @@ is saturated rather than latency-bound.
 |---|---:|
 | Kernel only (256×256, batch 128) | 53,126 img/s |
 | `convert_clahe` (NumPy in/out) | 11,911 img/s |
+
+<sub>A separate run on real radiographs rather than the synthetic sweep above, which is
+why the kernel-only figure differs from that table's 60,424 img/s at the same
+configuration. Not covered by the committed JSON.</sub>
 
 The PCIe transfer dominates. **If throughput matters, keep your data on the device** — pass
 a `tf.Tensor` with `return_tensor=True`, or call `clahe_gpu` directly.
@@ -395,10 +409,10 @@ pytest                                                    # 131 tests
 python benchmarks/run_benchmark.py --sizes 256 512 1024   # throughput table
 ```
 
-The benchmark writes JSON with `--json results.json`, including the full environment
-(TF version, GPU model, compute capability, platform). A throughput figure without its
-hardware is not a result. The raw data behind the throughput figure is committed at
-[`docs/benchmark_results.json`](docs/benchmark_results.json).
+The benchmark writes JSON with `--json results.json`, recording the full environment
+(TF version, GPU model, compute capability, driver, Python, platform), the parameters it
+was invoked with, and the command needed to repeat it. A throughput figure without its
+hardware is not a result, and one without its parameters cannot be checked.
 
 Figures 1–3 are regenerated from a directory of equally-sized single-channel PNGs:
 

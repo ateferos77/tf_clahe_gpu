@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import tensorflow as tf
 
-__all__ = ["CLAHEConfig", "total_gpu_memory_mb"]
+__all__ = ["CLAHEConfig", "gpu_driver_version", "total_gpu_memory_mb"]
 
 # Peak device memory the kernel touches per image, as a multiple of the image's
 # pixel count. The kernel holds the int32 values, the padded copy, the
@@ -59,6 +59,35 @@ _FALLBACK_BATCH_SIZE = 32
 _MAX_AUTO_BATCH_PIXELS = 8 << 20
 
 
+def _query_nvidia_smi(field: str) -> str | None:
+    """First device's value for an ``--query-gpu`` field, or None if unavailable.
+
+    Every failure mode - no GPU, no ``nvidia-smi`` on PATH, a non-zero exit, a
+    hang, empty output - collapses to None, which callers read as "unknown"
+    rather than as a value.
+    """
+    if not tf.config.list_physical_devices("GPU"):
+        return None
+
+    binary = shutil.which("nvidia-smi")
+    if binary is None:
+        return None
+
+    try:
+        output = subprocess.run(
+            [binary, f"--query-gpu={field}", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+    lines = output.strip().splitlines()
+    return lines[0].strip() if lines else None
+
+
 def total_gpu_memory_mb() -> int:
     """Total memory of the first visible GPU in MB, or 0 if unavailable.
 
@@ -74,31 +103,23 @@ def total_gpu_memory_mb() -> int:
     only dependable when the GPUs are identical - which is why it feeds a
     conservative batch-size heuristic rather than a hard allocation.
     """
-    if not tf.config.list_physical_devices("GPU"):
-        return 0
-
-    binary = shutil.which("nvidia-smi")
-    if binary is None:
-        return 0
-
-    try:
-        output = subprocess.run(
-            [binary, "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=True,
-        ).stdout
-    except (subprocess.SubprocessError, OSError):
-        return 0
-
-    lines = output.strip().splitlines()
-    if not lines:
+    raw = _query_nvidia_smi("memory.total")
+    if raw is None:
         return 0
     try:
-        return int(lines[0].strip())
+        return int(raw)
     except ValueError:
         return 0
+
+
+def gpu_driver_version() -> str | None:
+    """NVIDIA driver version of the first visible GPU, or None if unavailable.
+
+    Recorded in benchmark artefacts: the driver is part of what a throughput
+    number means, and quoting one in prose without capturing it leaves nothing
+    to check the prose against.
+    """
+    return _query_nvidia_smi("driver_version")
 
 
 @dataclass

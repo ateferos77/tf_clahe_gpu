@@ -19,6 +19,7 @@ from typing import Any, Callable
 import numpy as np
 import tensorflow as tf
 
+from .config import gpu_driver_version
 from .core import clahe_gpu, setup_gpu
 from .utils import get_gpu_info
 
@@ -50,10 +51,20 @@ def sync() -> None:
 class BenchmarkResult:
     """Timings for a single configuration.
 
+    Every parameter that shaped the measurement is recorded alongside it. A
+    serialised result that does not say how many repeats it is the median of,
+    or what tile size produced it, cannot be checked against the claim it is
+    quoted to support.
+
     Attributes:
         batch_size: Images per kernel call.
         num_images: Total images processed per repeat.
         image_shape: ``(H, W)`` of each image.
+        tile_size: CLAHE tile side length used.
+        clip_limit: Contrast limit used. For the OpenCV baseline this is
+            OpenCV's own ``clipLimit``, on a different scale - see
+            :func:`benchmark_opencv`.
+        num_repeats: Timed repeats the statistics below summarise.
         median_s: Median wall time of one full pass over ``num_images``.
         mean_s: Mean wall time.
         stdev_s: Standard deviation across repeats.
@@ -65,6 +76,9 @@ class BenchmarkResult:
     batch_size: int
     num_images: int
     image_shape: Sequence[int]
+    tile_size: int
+    clip_limit: float
+    num_repeats: int
     median_s: float
     mean_s: float
     stdev_s: float
@@ -102,6 +116,7 @@ def environment() -> dict[str, Any]:
     info = get_gpu_info()
     info["python"] = platform.python_version()
     info["platform"] = platform.platform()
+    info["driver_version"] = gpu_driver_version()
     return info
 
 
@@ -160,6 +175,11 @@ def benchmark_performance(
 
     if batch_sizes is None:
         batch_sizes = [b for b in (8, 16, 32, 64, 128, 256) if b <= num_images]
+        # Under 8 images none of the standard sizes fit and the sweep would
+        # return an empty report, which reads like a failure rather than a
+        # too-small request. Measure the whole set as one batch instead.
+        if not batch_sizes:
+            batch_sizes = [num_images]
 
     rng = np.random.default_rng(seed)
     images = rng.integers(0, 256, size=(num_images, height, width), dtype=np.uint8)
@@ -204,6 +224,9 @@ def benchmark_performance(
                 batch_size=batch_size,
                 num_images=processed,
                 image_shape=(height, width),
+                tile_size=tile_size,
+                clip_limit=clip_limit,
+                num_repeats=num_repeats,
                 median_s=median,
                 mean_s=statistics.fmean(timings),
                 stdev_s=statistics.stdev(timings) if len(timings) > 1 else 0.0,
@@ -275,6 +298,9 @@ def benchmark_opencv(
         batch_size=1,
         num_images=num_images,
         image_shape=(height, width),
+        tile_size=tile_size,
+        clip_limit=clip_limit,
+        num_repeats=num_repeats,
         median_s=median,
         mean_s=statistics.fmean(timings),
         stdev_s=statistics.stdev(timings) if len(timings) > 1 else 0.0,
