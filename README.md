@@ -27,7 +27,7 @@ each image is near-black background.</sub>
 - [What it does](#what-it-does) · [Installation](#installation) · [Quick start](#quick-start)
 - [Parameter conventions](#parameter-conventions) — **read this if you know OpenCV**
 - [Choosing `clip_limit`](#choosing-clip_limit) · [Agreement with OpenCV](#agreement-with-opencv)
-- [Performance](#performance) · [Determinism](#determinism) · [API](#api)
+- [Performance](#performance) · [Determinism](#determinism) · [API](#api) — [full reference](https://github.com/ateferos77/tf_clahe_gpu/blob/main/docs/API.md)
 - [Limitations](#limitations) · [Reproducing these results](#reproducing-these-results)
 - [Data and attribution](#data-and-attribution)
 
@@ -365,6 +365,9 @@ This is not automatic. Two properties make it hold, and both are load-bearing:
 ---
 
 ## API
+
+📘 **[Full API reference →](https://github.com/ateferos77/tf_clahe_gpu/blob/main/docs/API.md)** —
+every parameter, error message and recipe, with runnable examples.
 
 | Function | Purpose |
 |---|---|
