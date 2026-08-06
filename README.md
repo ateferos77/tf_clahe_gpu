@@ -13,7 +13,7 @@ batch of images is equalized in a handful of GPU kernels with no per-image Pytho
 **2.5 grey levels out of 255** at matched parameters, and producing **bit-identical
 output** across CPU/GPU, Python versions and TensorFlow versions.
 
-![CLAHE on a hand radiograph](docs/images/fig1_qualitative.png)
+![CLAHE on a hand radiograph](https://raw.githubusercontent.com/ateferos77/tf_clahe_gpu/main/docs/images/fig1_qualitative.png)
 
 <sub>Pediatric hand radiograph from the RSNA Pediatric Bone Age Machine Learning
 Challenge dataset (Halabi et al., *Radiology* 2019 — see
@@ -201,7 +201,7 @@ grid = (-(-width // tile_size), -(-height // tile_size))   # (cols, rows)
 
 ## Choosing `clip_limit`
 
-![clip_limit trade-off](docs/images/fig2_clip_limit.png)
+![clip_limit trade-off](https://raw.githubusercontent.com/ateferos77/tf_clahe_gpu/main/docs/images/fig2_clip_limit.png)
 
 CLAHE amplifies noise in regions that carry no signal. This is inherent to the algorithm,
 not to this implementation — OpenCV does the same thing.
@@ -237,7 +237,7 @@ whatever your downstream task actually optimises.
 and the suite asserts the two are **bit-identical**. That pins regressions, but it cannot
 catch a conceptual error, since both share an algorithm. OpenCV is the independent check.
 
-![Agreement with OpenCV](docs/images/fig3_opencv.png)
+![Agreement with OpenCV](https://raw.githubusercontent.com/ateferos77/tf_clahe_gpu/main/docs/images/fig3_opencv.png)
 
 Measured on 64 radiographs at `tile_size=32` ↔ `tileGridSize=(8,8)`, sweeping OpenCV's
 `clipLimit` from 0.5 to 20 in steps of 0.25 to find the true best match:
@@ -280,7 +280,7 @@ a fast, independently-validated CLAHE, not a port.
 
 ## Performance
 
-![Throughput](docs/images/fig4_throughput.png)
+![Throughput](https://raw.githubusercontent.com/ateferos77/tf_clahe_gpu/main/docs/images/fig4_throughput.png)
 
 Measured on an **NVIDIA GTX 1650** (4 GB, 896 CUDA cores, compute capability 7.5), driver
 535.309.01, TensorFlow 2.20.0, Python 3.9.23. This is a low-end laptop GPU; a datacentre
@@ -295,7 +295,7 @@ python benchmarks/run_benchmark.py --sizes 256 512 1024 --num-images 1024 \
     --json docs/benchmark_results.json
 ```
 
-The raw data is committed at [`docs/benchmark_results.json`](docs/benchmark_results.json).
+The raw data is committed at [`docs/benchmark_results.json`](https://github.com/ateferos77/tf_clahe_gpu/blob/main/docs/benchmark_results.json).
 That file predates the harness recording its own parameters, so it pins the image count
 and the environment but not the repeat count — see `provenance_note` inside it. Runs from
 the current harness embed a `parameters` block and the exact `command`.
@@ -503,7 +503,7 @@ mypy gpu_clahe
 CI runs lint, type-check, the suite on Python 3.9–3.13 across Linux/macOS/Windows, and a
 build job that installs the wheel from a temporary directory and smoke-tests it.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](https://github.com/ateferos77/tf_clahe_gpu/blob/main/CONTRIBUTING.md).
 
 ## Upgrading from 1.x
 
@@ -514,7 +514,7 @@ rather than silently mangled. See [Parameter conventions](#parameter-conventions
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/ateferos77/tf_clahe_gpu/blob/main/LICENSE).
 
 ## Citation
 
