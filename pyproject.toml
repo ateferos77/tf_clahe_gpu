@@ -17,6 +17,12 @@ authors = [
     { name = "Bahador Mirzazadeh", email = "baha2r.mirzazadeh98@gmail.com" },
     { name = "Atefe Rostami", email = "ateferos77@gmail.com" },
 ]
+# PyPI's Credits panel renders only the first entry of Author-email, so the
+# second author is invisible there. Naming the project maintainer separately
+# gives both names a line on the project page.
+maintainers = [
+    { name = "Atefe Rostami", email = "ateferos77@gmail.com" },
+]
 keywords = [
     "clahe",
     "computer-vision",
